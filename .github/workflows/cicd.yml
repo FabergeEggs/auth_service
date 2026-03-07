@@ -1,0 +1,99 @@
+name: CI/CD for auth service
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - "feature/**"
+      - "release/**"
+      - "hotfix/**"
+
+  pull_request:
+    branches:
+      - main
+      - develop
+
+env:
+  IMAGE_NAME: auth-service
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install pytest
+
+      - name: Run tests
+        run: python -m pytest
+
+  docker:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+
+    steps:
+    - uses: actions/checkout@v4
+
+      - name: Extract branch name
+        run: echo "BRANCH_NAME=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Prepare tags
+        run: |
+          IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
+
+          TAGS="$IMAGE:${{ github.sha }}"
+
+          if [ "$BRANCH_NAME" = "develop" ]; then
+            TAGS="$TAGS,$IMAGE:develop"
+          fi
+
+          if [ "$BRANCH_NAME" = "main" ]; then
+            TAGS="$TAGS,$IMAGE:latest"
+          fi
+
+          if [[ "$BRANCH_NAME" == feature/* ]]; then
+            TAG=$(echo $BRANCH_NAME | sed 's|feature/||')
+            TAGS="$TAGS,$IMAGE:feature-$TAG"
+          fi
+
+          if [[ "$BRANCH_NAME" == release/* ]]; then
+            TAG=$(echo $BRANCH_NAME | sed 's|release/||')
+            TAGS="$TAGS,$IMAGE:rc-$TAG"
+          fi
+
+          if [[ "$BRANCH_NAME" == hotfix/* ]]; then
+            TAG=$(echo $BRANCH_NAME | sed 's|hotfix/||')
+            TAGS="$TAGS,$IMAGE:hotfix-$TAG"
+          fi
+
+          echo "TAGS=$TAGS" >> $GITHUB_ENV
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ env.TAGS }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+

@@ -1,0 +1,9 @@
+[project]
+name = "auth_service"
+version = "0.1.0"
+description = "description"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.135.1",
+]
