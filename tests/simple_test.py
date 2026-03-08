@@ -1,4 +1,3 @@
-import pytest
 import math
 
 def test_math_operations():

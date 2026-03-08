@@ -48,6 +48,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
+          pip install -r requirements-dev.txt
           pip install mypy
 
       - name: Run mypy
@@ -80,7 +81,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Run Hadolint
-        uses: hadolint/hadolint-action@v3
+        uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: Dockerfile
 
