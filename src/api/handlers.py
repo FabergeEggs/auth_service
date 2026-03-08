@@ -6,8 +6,8 @@ app = FastAPI()
 
 @app.get("/auth/")
 def who_i_am():
-    return {"message": "I am auth service! And I was changed!"}
-    
+    return {"message": "I am auth service! And I was changed! Twice!"}
+
 @app.get("/health")
 async def health_check():
     return JSONResponse({"status": "healthy"})

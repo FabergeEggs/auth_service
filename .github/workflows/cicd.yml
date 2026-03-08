@@ -18,8 +18,44 @@ env:
   IMAGE_NAME: faberge-auth-service
 
 jobs:
+  ruff:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.13"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff
+        run: ruff check .
+
+
+  mypy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install mypy
+
+      - name: Run mypy
+        run: mypy .
+
   test:
     runs-on: ubuntu-latest
+    needs: [ruff, mypy]
 
     steps:
       - uses: actions/checkout@v3
@@ -36,9 +72,20 @@ jobs:
 
       - name: Run tests
         run: python -m pytest
+  
+  hadolint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Hadolint
+        uses: hadolint/hadolint-action@v3
+        with:
+          dockerfile: Dockerfile
 
   docker:
-    needs: test
+    needs: [test, hadolint]
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
 
