@@ -1,16 +1,17 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from src.adapters.keycloak_adapter import KeycloakAdapter, TokenVerifier
+from src.api.handlers import create_app
+from src.service.auth_service import AuthService
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-
-    app_name: str = "Auth Service"
 
     keycloak_base_url: str = "http://localhost:8081"
     keycloak_realm: str = "myrealm"
     keycloak_client_id: str = "auth-service"
     keycloak_client_secret: str | None = None
-
     keycloak_issuer: str = "http://localhost:8081/realms/myrealm"
     keycloak_audience: str = "auth-service"
 
@@ -37,9 +38,23 @@ class Settings(BaseSettings):
 
     @property
     def admin_users_url(self) -> str:
-        return (
-            f"{self.keycloak_base_url}/admin/realms/{self.keycloak_realm}/users"
-        )
+        return f"{self.keycloak_base_url}/admin/realms/{self.keycloak_realm}/users"
 
 
 settings = Settings()
+
+keycloak_adapter = KeycloakAdapter(
+    token_url=settings.token_url,
+    logout_url=settings.logout_url,
+    admin_users_url=settings.admin_users_url,
+    client_id=settings.keycloak_client_id,
+    client_secret=settings.keycloak_client_secret,
+)
+token_verifier = TokenVerifier(
+    jwks_url=settings.jwks_url,
+    issuer=settings.keycloak_issuer,
+    audience=settings.keycloak_audience,
+)
+auth_service = AuthService(auth_provider=keycloak_adapter)
+
+app = create_app(auth_service=auth_service, token_verifier=token_verifier)

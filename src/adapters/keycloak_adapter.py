@@ -1,7 +1,14 @@
 import httpx
+from fastapi import HTTPException, status
+from jose import jwt
+from jose.exceptions import JWTError
 
 
-class KeycloakClient:
+class KeycloakConflictError(Exception):
+    pass
+
+
+class KeycloakAdapter:
     def __init__(
         self,
         token_url: str,
@@ -23,22 +30,14 @@ class KeycloakClient:
         return creds
 
     async def _get_admin_token(self) -> str:
-        """Get service-account token for Admin REST API calls."""
         data = {**self._client_creds(), "grant_type": "client_credentials"}
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(self.token_url, data=data)
             resp.raise_for_status()
             return resp.json()["access_token"]
 
-    async def register(
-        self,
-        username: str,
-        email: str,
-        password: str,
-    ) -> str:
-        """Create user via Keycloak Admin REST API. Returns created user id."""
+    async def register(self, username: str, email: str, password: str) -> str:
         admin_token = await self._get_admin_token()
-
         user_payload = {
             "username": username,
             "email": email,
@@ -63,8 +62,7 @@ class KeycloakClient:
             resp.raise_for_status()
 
             location = resp.headers.get("Location", "")
-            user_id = location.rsplit("/", maxsplit=1)[-1] if location else ""
-            return user_id
+            return location.rsplit("/", maxsplit=1)[-1] if location else ""
 
     async def password_login(self, username: str, password: str) -> dict:
         data = {
@@ -96,5 +94,43 @@ class KeycloakClient:
             resp.raise_for_status()
 
 
-class KeycloakConflictError(Exception):
-    pass
+class TokenVerifier:
+    def __init__(self, jwks_url: str, issuer: str, audience: str):
+        self.jwks_url = jwks_url
+        self.issuer = issuer
+        self.audience = audience
+        self._jwks_cache: dict | None = None
+
+    async def _get_jwks(self) -> dict:
+        if self._jwks_cache is not None:
+            return self._jwks_cache
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(self.jwks_url)
+            resp.raise_for_status()
+            self._jwks_cache = resp.json()
+            return self._jwks_cache
+
+    async def verify(self, token: str) -> dict:
+        try:
+            jwks = await self._get_jwks()
+            kid = jwt.get_unverified_header(token).get("kid")
+            key = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
+            if not key:
+                self._jwks_cache = None
+                jwks = await self._get_jwks()
+                key = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
+            if not key:
+                raise HTTPException(status_code=401, detail="Signing key not found")
+
+            return jwt.decode(
+                token,
+                key,
+                algorithms=["RS256"],
+                issuer=self.issuer,
+                audience=self.audience,
+            )
+        except JWTError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired token",
+            )

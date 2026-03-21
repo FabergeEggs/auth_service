@@ -1,4 +1,4 @@
-from src.api.handlers import app
+from src.main import app
 import uvicorn
 
 

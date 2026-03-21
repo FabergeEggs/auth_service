@@ -1,5 +1,6 @@
-from pydantic import BaseModel, EmailStr, Field
 from typing import Any
+
+from pydantic import BaseModel, EmailStr, Field
 
 
 class RegisterRequestDTO(BaseModel):
