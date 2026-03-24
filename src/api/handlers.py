@@ -112,4 +112,3 @@ def create_app(auth_service: AuthService, token_verifier: TokenVerifier) -> Fast
         return JSONResponse({"status": "healthy"})
 
     return app
-
