@@ -1,0 +1,31 @@
+{
+  "realm": "myrealm",
+  "enabled": true,
+  "displayName": "My Realm",
+  "users": [
+    {
+      "username": "testuser",
+      "enabled": true,
+      "email": "test@example.com",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "password123",
+          "temporary": false
+        }
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "auth-service",
+      "enabled": true,
+      "publicClient": false,
+      "serviceAccountsEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "redirectUris": ["*"],
+      "secret": "MuRRblJrxOfcJBmqxo21POIokbagWJ4a"
+    }
+  ]
+}
