@@ -8,6 +8,36 @@ class KeycloakConflictError(Exception):
     pass
 
 
+def _default_display_name(email: str) -> str:
+    """Локальная часть email — как минимум firstName для Keycloak User Profile."""
+    local = email.split("@", 1)[0].strip() or "user"
+    return local[:250]
+
+
+def _user_representation_for_put(user: dict, email: str) -> dict:
+    """Подготовка тела PUT /users/{id}: убрать read-only поля, снять required actions."""
+    body = dict(user)
+    body["requiredActions"] = []
+    body["emailVerified"] = True
+    body["enabled"] = True
+    # Keycloak 24+: в User Profile часто обязательны firstName / lastName — иначе
+    # password grant: invalid_grant Account is not fully set up
+    if not (body.get("firstName") or "").strip():
+        body["firstName"] = _default_display_name(email)
+    if not (body.get("lastName") or "").strip():
+        body["lastName"] = "User"
+    for k in (
+        "origin",
+        "self",
+        "access",
+        "userProfileMetadata",
+        "federationLink",
+        "serviceAccountClientId",
+    ):
+        body.pop(k, None)
+    return body
+
+
 class KeycloakAdapter:
     def __init__(
         self,
@@ -41,7 +71,13 @@ class KeycloakAdapter:
         user_payload = {
             "username": username,
             "email": email,
+            "firstName": _default_display_name(email),
+            "lastName": "User",
             "enabled": True,
+            # Иначе realm с «обязательной верификацией почты» блокирует password grant
+            "emailVerified": True,
+            # Сбрасываем дефолтные required actions realm (VERIFY_EMAIL и т.д.)
+            "requiredActions": [],
             "credentials": [
                 {
                     "type": "password",
@@ -62,7 +98,39 @@ class KeycloakAdapter:
             resp.raise_for_status()
 
             location = resp.headers.get("Location", "")
-            return location.rsplit("/", maxsplit=1)[-1] if location else ""
+            user_id = location.rsplit("/", maxsplit=1)[-1] if location else ""
+            if not user_id:
+                raise RuntimeError("Keycloak created user but Location header has no user id")
+
+            # Надёжно выставить пароль: в части конфигов Keycloak игнорирует credentials в POST /users
+            reset = await client.put(
+                f"{self.admin_users_url}/{user_id}/reset-password",
+                json={
+                    "type": "password",
+                    "value": password,
+                    "temporary": False,
+                },
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            reset.raise_for_status()
+
+            # Keycloak может оставить required actions → invalid_grant: Account is not fully set up
+            get_user = await client.get(
+                f"{self.admin_users_url}/{user_id}",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            get_user.raise_for_status()
+            put_body = _user_representation_for_put(get_user.json(), email)
+            sync = await client.put(
+                f"{self.admin_users_url}/{user_id}",
+                json=put_body,
+                headers={
+                    "Authorization": f"Bearer {admin_token}",
+                    "Content-Type": "application/json",
+                },
+            )
+            sync.raise_for_status()
+            return user_id
 
     async def password_login(self, username: str, password: str) -> dict:
         data = {
@@ -70,6 +138,7 @@ class KeycloakAdapter:
             "grant_type": "password",
             "username": username,
             "password": password,
+            "scope": "openid",
         }
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(self.token_url, data=data)
@@ -122,13 +191,25 @@ class TokenVerifier:
             if not key:
                 raise HTTPException(status_code=401, detail="Signing key not found")
 
-            return jwt.decode(
+            claims = jwt.decode(
                 token,
                 key,
                 algorithms=["RS256"],
                 issuer=self.issuer,
-                audience=self.audience,
+                options={"verify_aud": False},
             )
+            aud_claim = claims.get("aud")
+            azp_claim = claims.get("azp")
+            audience_ok = False
+            if isinstance(aud_claim, str):
+                audience_ok = aud_claim == self.audience
+            elif isinstance(aud_claim, list):
+                audience_ok = self.audience in aud_claim
+            if azp_claim == self.audience:
+                audience_ok = True
+            if not audience_ok:
+                raise HTTPException(status_code=401, detail="Invalid token audience")
+            return claims
         except JWTError:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
 from httpx import HTTPStatusError
@@ -13,6 +15,8 @@ from src.api.dto import (
     TokenResponseDTO,
 )
 from src.service.auth_service import AuthService
+
+logger = logging.getLogger("auth_service.api")
 
 
 def create_app(auth_service: AuthService, token_verifier: TokenVerifier) -> FastAPI:
@@ -33,8 +37,9 @@ def create_app(auth_service: AuthService, token_verifier: TokenVerifier) -> Fast
         business: AuthService = Depends(get_auth_service),
     ) -> RegisterResponseDTO:
         try:
+            username = payload.username or payload.email
             user_id = await business.register(
-                username=payload.username,
+                username=username,
                 email=payload.email,
                 password=payload.password,
             )
@@ -42,10 +47,15 @@ def create_app(auth_service: AuthService, token_verifier: TokenVerifier) -> Fast
         except KeycloakConflictError:
             raise HTTPException(status_code=409, detail="User already exists")
         except HTTPStatusError as exc:
+            logger.warning("Registration failed: %s", exc.response.text)
             raise HTTPException(
                 status_code=exc.response.status_code,
-                detail="Registration failed",
+                detail=f"Registration failed: {exc.response.text}",
             )
+        except Exception:
+            logger.exception("Unexpected registration error")
+            raise HTTPException(status_code=500, detail="Internal error")
+
 
     @app.post("/auth/login", response_model=TokenResponseDTO)
     async def login(
@@ -55,8 +65,18 @@ def create_app(auth_service: AuthService, token_verifier: TokenVerifier) -> Fast
         try:
             data = await business.login(email=payload.email, password=payload.password)
             return TokenResponseDTO(**data)
-        except HTTPStatusError:
-            raise HTTPException(status_code=401, detail="Invalid credentials")
+        except HTTPStatusError as exc:
+            detail = "Invalid credentials"
+            try:
+                err = exc.response.json()
+                if isinstance(err, dict) and err.get("error_description"):
+                    detail = (
+                        f"Invalid credentials ({err.get('error', 'error')}: "
+                        f"{err['error_description']})"
+                    )
+            except Exception:
+                pass
+            raise HTTPException(status_code=401, detail=detail)
 
     @app.post("/auth/refresh", response_model=TokenResponseDTO)
     async def refresh(
@@ -92,3 +112,4 @@ def create_app(auth_service: AuthService, token_verifier: TokenVerifier) -> Fast
         return JSONResponse({"status": "healthy"})
 
     return app
+
