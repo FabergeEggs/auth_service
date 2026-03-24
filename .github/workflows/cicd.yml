@@ -15,7 +15,7 @@ on:
       - develop
 
 env:
-  IMAGE_NAME: faberge-auth-service
+  IMAGE_NAME: inchanterx/faberge-auth-service
 
 jobs:
   ruff:
