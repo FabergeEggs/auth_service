@@ -37,11 +37,14 @@ def create_app(auth_service: AuthService, token_verifier: TokenVerifier) -> Fast
         business: AuthService = Depends(get_auth_service),
     ) -> RegisterResponseDTO:
         try:
-            username = payload.username or payload.email
             user_id = await business.register(
-                username=username,
+                username=payload.username,
                 email=payload.email,
                 password=payload.password,
+                first_name=payload.first_name,
+                last_name=payload.last_name,
+                phone=payload.phone,
+                about=payload.about,
             )
             return RegisterResponseDTO(user_id=user_id)
         except KeycloakConflictError:
@@ -63,7 +66,10 @@ def create_app(auth_service: AuthService, token_verifier: TokenVerifier) -> Fast
         business: AuthService = Depends(get_auth_service),
     ) -> TokenResponseDTO:
         try:
-            data = await business.login(email=payload.email, password=payload.password)
+            data = await business.login(
+                login=payload.login,
+                password=payload.password
+            )
             return TokenResponseDTO(**data)
         except HTTPStatusError as exc:
             detail = "Invalid credentials"
@@ -77,6 +83,8 @@ def create_app(auth_service: AuthService, token_verifier: TokenVerifier) -> Fast
             except Exception:
                 pass
             raise HTTPException(status_code=401, detail=detail)
+
+
 
     @app.post("/auth/refresh", response_model=TokenResponseDTO)
     async def refresh(

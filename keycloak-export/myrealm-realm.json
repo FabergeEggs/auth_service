@@ -10,7 +10,8 @@
       "serviceAccountsEnabled": true,
       "directAccessGrantsEnabled": true,
       "standardFlowEnabled": true,
-      "redirectUris": ["*"]
+      "redirectUris": ["*"],
+      "secret": "nmeYwMzWRHuLb7V5iCnF9T8vQ2TlW3af"
     }
   ]
 }
