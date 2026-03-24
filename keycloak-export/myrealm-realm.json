@@ -1,0 +1,16 @@
+{
+  "realm": "myrealm",
+  "enabled": true,
+  "displayName": "My Realm",
+  "clients": [
+    {
+      "clientId": "auth-service",
+      "enabled": true,
+      "publicClient": false,
+      "serviceAccountsEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "redirectUris": ["*"]
+    }
+  ]
+}
