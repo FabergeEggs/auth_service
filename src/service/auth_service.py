@@ -1,49 +1,63 @@
-from typing import Protocol
+from typing import Optional
+import logging
 
+from src.adapters.keycloak_adapter import KeycloakAdapter
 
-class AuthProvider(Protocol):
-    async def register(self, username: str, email: str, password: str) -> str: ...
-
-    async def password_login(self, username: str, password: str) -> dict: ...
-
-    async def refresh(self, refresh_token: str) -> dict: ...
-
-    async def logout(self, refresh_token: str) -> None: ...
-
+logger = logging.getLogger(__name__)
 
 class AuthService:
-    def __init__(self, auth_provider: AuthProvider):
+    def __init__(self, auth_provider: KeycloakAdapter):
         self.auth_provider = auth_provider
 
-    async def register(self, username: str, email: str, password: str) -> str:
-        return await self.auth_provider.register(
+    async def register(
+        self,
+        username: str,
+        email: str,
+        password: str,
+        first_name: Optional[str] = None,
+        last_name: Optional[str] = None,
+        phone: Optional[str] = None,
+        about: Optional[str] = None,
+    ) -> str:
+        """Регистрация пользователя"""
+        user_id = await self.auth_provider.create_user(
             username=username,
             email=email,
             password=password,
+            first_name=first_name,
+            last_name=last_name,
+            phone=phone,
+            about=about,
         )
+        return user_id
 
-    async def login(self, email: str, password: str) -> dict:
-        return await self.auth_provider.password_login(
-            username=email,
-            password=password,
-        )
+    async def login(self, login: str, password: str) -> dict:
+        """Логин по email или username"""
+        if "@" in login:
+            return await self.auth_provider.login_with_email(login, password)
+        else:
+            return await self.auth_provider.login_with_username(login, password)
 
     async def refresh(self, refresh_token: str) -> dict:
-        return await self.auth_provider.refresh(refresh_token)
+        """Обновление токена"""
+        return await self.auth_provider.refresh_token(refresh_token)
 
     async def logout(self, refresh_token: str) -> None:
+        """Выход пользователя"""
         await self.auth_provider.logout(refresh_token)
 
-    @staticmethod
-    def me_payload(claims: dict) -> dict:
+    def me_payload(self, claims: dict) -> dict:
+        """Формирование payload для /me"""
         return {
-            "sub": claims.get("sub", ""),
+            "sub": claims.get("sub"),
             "email": claims.get("email"),
             "preferred_username": claims.get("preferred_username"),
+            "name": claims.get("name"),
+            "given_name": claims.get("given_name"),
+            "family_name": claims.get("family_name"),
+            "phone": claims.get("attributes", {}).get("phone", [None])[0] if claims.get("attributes") else None,
+            "about": claims.get("attributes", {}).get("about", [None])[0] if claims.get("attributes") else None,
             "realm_roles": claims.get("realm_access", {}).get("roles", []),
-            "client_roles": {
-                client: data.get("roles", [])
-                for client, data in claims.get("resource_access", {}).items()
-            },
+            "client_roles": claims.get("resource_access", {}),
             "raw_claims": claims,
         }

@@ -2,6 +2,7 @@ services:
   postgres:
     image: postgres:15-alpine
     container_name: auth_postgres
+    restart: unless-stopped
     environment:
       POSTGRES_DB: keycloak
       POSTGRES_USER: keycloak
@@ -19,6 +20,7 @@ services:
   keycloak:
     image: quay.io/keycloak/keycloak:latest
     container_name: auth_keycloak
+    restart: unless-stopped
     command: start-dev --import-realm
     environment:
       KC_DB: postgres
@@ -45,12 +47,13 @@ services:
   auth_service:
     build: .
     container_name: auth_service
+    restart: unless-stopped
     environment:
       KEYCLOAK_BASE_URL: http://keycloak:8080
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-myrealm}
       KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-auth-service}
       KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET}
-      KEYCLOAK_ISSUER: http://localhost:8080/realms/${KEYCLOAK_REALM:-myrealm}
+      KEYCLOAK_ISSUER: http://keycloak:8080/realms/${KEYCLOAK_REALM:-myrealm}
       KEYCLOAK_AUDIENCE: ${KEYCLOAK_AUDIENCE:-auth-service}
     ports:
       - "8000:8000"
