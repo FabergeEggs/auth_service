@@ -2,7 +2,6 @@ import logging
 from typing import Optional
 
 import httpx
-from httpx import HTTPStatusError
 
 logger = logging.getLogger(__name__)
 
