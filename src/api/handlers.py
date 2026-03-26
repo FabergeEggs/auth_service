@@ -16,6 +16,15 @@ from src.api.dto import (
 )
 from src.service.auth_service import AuthService
 
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # В продакшене замените на конкретные домены
+    allow_credentials=True,
+    allow_methods=["http://localhost:3000"],
+    allow_headers=["http://localhost:3000"],
+)
+
 logger = logging.getLogger("auth_service.api")
 
 

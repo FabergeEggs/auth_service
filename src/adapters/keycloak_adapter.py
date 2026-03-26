@@ -1,5 +1,7 @@
 import logging
 from typing import Optional
+import base64
+import json
 
 import httpx
 
@@ -186,9 +188,6 @@ class TokenVerifier:
         # В реальной реализации здесь должна быть проверка подписи
         # с использованием JWKS и библиотеки python-jose
         # Для упрощения возвращаем декодированные claims
-        
-        import base64
-        import json
         
         # Простое декодирование без проверки подписи
         # В продакшене используйте python-jose для полноценной верификации
