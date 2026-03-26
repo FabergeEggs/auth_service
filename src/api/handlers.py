@@ -1,6 +1,7 @@
 import logging
 
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from httpx import HTTPStatusError
 
@@ -22,6 +23,21 @@ logger = logging.getLogger("auth_service.api")
 def create_app(auth_service: AuthService, token_verifier: TokenVerifier) -> FastAPI:
     app = FastAPI(title="Auth Service")
 
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "http://localhost:8080",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:5173",
+            "*"
+        ],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    
     async def get_current_claims(authorization: str = Header(default="")) -> dict:
         if not authorization.startswith("Bearer "):
             raise HTTPException(status_code=401, detail="Missing bearer token")
