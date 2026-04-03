@@ -10,25 +10,21 @@ class AuthService:
         self.auth_provider = auth_provider
 
     async def register(
-        self,
-        username: str,
-        email: str,
-        password: str,
-        first_name: Optional[str] = None,
-        last_name: Optional[str] = None,
-        phone: Optional[str] = None,
-        about: Optional[str] = None,
-    ) -> str:
-        """Регистрация пользователя"""
+    self,
+    email: str,
+    password: str,
+    first_name: str,          
+    last_name: Optional[str] = None,
+    phone: Optional[str] = None,
+    about: Optional[str] = None ) -> str:
         user_id = await self.auth_provider.create_user(
-            username=username,
+            username=email,           # email используется как username
             email=email,
             password=password,
             first_name=first_name,
             last_name=last_name,
             phone=phone,
-            about=about,
-        )
+            about=about )
         return user_id
 
     async def login(self, login: str, password: str) -> dict:

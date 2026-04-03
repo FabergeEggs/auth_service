@@ -1,6 +1,6 @@
 import logging
-
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware   # <-- добавлен импорт
 from fastapi.responses import JSONResponse
 from httpx import HTTPStatusError
 
@@ -16,20 +16,19 @@ from src.api.dto import (
 )
 from src.service.auth_service import AuthService
 
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # В продакшене замените на конкретные домены
-    allow_credentials=True,
-    allow_methods=["http://localhost:3000"],
-    allow_headers=["http://localhost:3000"],
-)
-
 logger = logging.getLogger("auth_service.api")
-
 
 def create_app(auth_service: AuthService, token_verifier: TokenVerifier) -> FastAPI:
     app = FastAPI(title="Auth Service")
+
+    # Настройка CORS – теперь здесь
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3000"],  # или ["*"] для разработки
+        allow_credentials=True,
+        allow_methods=["*"],        # вместо ошибочного URL
+        allow_headers=["*"],        # вместо ошибочного URL
+    )
 
     async def get_current_claims(authorization: str = Header(default="")) -> dict:
         if not authorization.startswith("Bearer "):
@@ -47,7 +46,6 @@ def create_app(auth_service: AuthService, token_verifier: TokenVerifier) -> Fast
     ) -> RegisterResponseDTO:
         try:
             user_id = await business.register(
-                username=payload.username,
                 email=payload.email,
                 password=payload.password,
                 first_name=payload.first_name,
@@ -68,32 +66,23 @@ def create_app(auth_service: AuthService, token_verifier: TokenVerifier) -> Fast
             logger.exception("Unexpected registration error")
             raise HTTPException(status_code=500, detail="Internal error")
 
-
     @app.post("/auth/login", response_model=TokenResponseDTO)
     async def login(
         payload: LoginRequestDTO,
         business: AuthService = Depends(get_auth_service),
     ) -> TokenResponseDTO:
         try:
-            data = await business.login(
-                login=payload.login,
-                password=payload.password
-            )
+            data = await business.login(login=payload.login, password=payload.password)
             return TokenResponseDTO(**data)
         except HTTPStatusError as exc:
             detail = "Invalid credentials"
             try:
                 err = exc.response.json()
                 if isinstance(err, dict) and err.get("error_description"):
-                    detail = (
-                        f"Invalid credentials ({err.get('error', 'error')}: "
-                        f"{err['error_description']})"
-                    )
+                    detail = f"Invalid credentials ({err.get('error', 'error')}: {err['error_description']})"
             except Exception:
                 pass
             raise HTTPException(status_code=401, detail=detail)
-
-
 
     @app.post("/auth/refresh", response_model=TokenResponseDTO)
     async def refresh(

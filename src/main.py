@@ -14,31 +14,20 @@ class Settings(BaseSettings):
     keycloak_realm: str = "myrealm"
     keycloak_client_id: str = "auth-service"
     keycloak_client_secret: str | None = None
-    # Должен совпадать с полем iss в JWT. У Keycloak в Docker порт снаружи 8081,
-    # но в токене часто iss с внутренним 8080 — см. .env KEYCLOAK_ISSUER.
     keycloak_issuer: str = "http://localhost:8080/realms/myrealm"
     keycloak_audience: str = "auth-service"
 
     @property
     def token_url(self) -> str:
-        return (
-            f"{self.keycloak_base_url}/realms/{self.keycloak_realm}"
-            "/protocol/openid-connect/token"
-        )
+        return f"{self.keycloak_base_url}/realms/{self.keycloak_realm}/protocol/openid-connect/token"
 
     @property
     def logout_url(self) -> str:
-        return (
-            f"{self.keycloak_base_url}/realms/{self.keycloak_realm}"
-            "/protocol/openid-connect/logout"
-        )
+        return f"{self.keycloak_base_url}/realms/{self.keycloak_realm}/protocol/openid-connect/logout"
 
     @property
     def jwks_url(self) -> str:
-        return (
-            f"{self.keycloak_base_url}/realms/{self.keycloak_realm}"
-            "/protocol/openid-connect/certs"
-        )
+        return f"{self.keycloak_base_url}/realms/{self.keycloak_realm}/protocol/openid-connect/certs"
 
     @property
     def admin_users_url(self) -> str:
