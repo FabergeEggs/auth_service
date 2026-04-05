@@ -42,6 +42,14 @@ class AuthService:
         """Выход пользователя"""
         await self.auth_provider.logout(refresh_token)
 
+    async def change_email(self, user_id: str, new_email: str) -> None:
+        """Сменить email пользователя и отправить подтверждение на новый адрес"""
+        await self.auth_provider.update_email_and_send_verification(user_id, new_email)
+
+    async def resend_verification(self, user_id: str) -> None:
+        """Повторно отправить письмо с подтверждением на текущий email"""
+        await self.auth_provider.send_verification_email(user_id)
+
     def me_payload(self, claims: dict) -> dict:
         """Формирование payload для /me"""
         return {

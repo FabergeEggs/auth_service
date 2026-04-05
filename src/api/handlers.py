@@ -13,6 +13,7 @@ from src.api.dto import (
     RegisterRequestDTO,
     RegisterResponseDTO,
     TokenResponseDTO,
+    ChangeEmailRequestDTO
 )
 from src.service.auth_service import AuthService
 
@@ -105,6 +106,42 @@ def create_app(auth_service: AuthService, token_verifier: TokenVerifier) -> Fast
             return JSONResponse({"status": "ok"})
         except HTTPStatusError:
             raise HTTPException(status_code=400, detail="Logout failed")
+        
+    @app.post("/auth/change-email")
+    async def change_email(
+        payload: ChangeEmailRequestDTO,
+        claims: dict = Depends(get_current_claims),
+        business: AuthService = Depends(get_auth_service),
+    ):
+        user_id = claims.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        try:
+            await business.change_email(user_id, payload.new_email)
+            return {"message": "Verification email sent to new address. Please check your inbox."}
+        except HTTPStatusError as exc:
+            if exc.response.status_code == 409:
+                raise HTTPException(status_code=409, detail="Email already in use by another account")
+            logger.warning("Email change failed: %s", exc.response.text)
+            raise HTTPException(status_code=400, detail="Could not change email")
+        except Exception:
+            logger.exception("Unexpected error during email change")
+            raise HTTPException(status_code=500, detail="Internal error")
+
+    @app.post("/auth/resend-verification")
+    async def resend_verification(
+        claims: dict = Depends(get_current_claims),
+        business: AuthService = Depends(get_auth_service),
+    ):
+        user_id = claims.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        try:
+            await business.resend_verification(user_id)
+            return {"message": "Verification email resent. Please check your inbox."}
+        except Exception:
+            logger.exception("Failed to resend verification email")
+            raise HTTPException(status_code=500, detail="Could not resend verification email")
 
     @app.get("/auth/me", response_model=MeResponseDTO)
     async def me(

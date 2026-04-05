@@ -3,7 +3,8 @@ from typing import Any, Optional
 from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field
 
 
-
+class ChangeEmailRequestDTO(BaseModel):
+    new_email: EmailStr = Field(..., description="Новый email адрес")
 
 class RegisterRequestDTO(BaseModel):
     email: EmailStr

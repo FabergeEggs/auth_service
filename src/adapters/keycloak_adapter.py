@@ -101,6 +101,7 @@ class KeycloakAdapter:
             location = response.headers.get("Location")
             if location:
                 user_id = location.split("/")[-1]
+                await self.send_verification_email(user_id)
                 return user_id
 
             raise Exception("Failed to get user id from response")
@@ -168,6 +169,29 @@ class KeycloakAdapter:
             )
             response.raise_for_status()
             return response.json()
+        
+    async def update_email_and_send_verification(self, user_id: str, new_email: str) -> None:
+        """Обновить email пользователя и отправить письмо для подтверждения"""
+        admin_token = await self._get_admin_token()
+        async with httpx.AsyncClient() as client:
+            resp = await client.put(
+                f"{self.admin_users_url}/{user_id}",
+                headers={"Authorization": f"Bearer {admin_token}"},
+                json={"email": new_email, "emailVerified": False}
+            )
+            resp.raise_for_status()
+            await self.send_verification_email(user_id)
+
+    async def send_verification_email(self, user_id: str) -> None:
+        """Отправить письмо с подтверждением email на текущий адрес пользователя"""
+        admin_token = await self._get_admin_token()
+        async with httpx.AsyncClient() as client:
+            resp = await client.put(
+                f"{self.admin_users_url}/{user_id}/execute-actions-email",
+                headers={"Authorization": f"Bearer {admin_token}"},
+                json=["VERIFY_EMAIL"]
+            )
+            resp.raise_for_status()
 
 
 class KeycloakConflictError(Exception):
