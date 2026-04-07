@@ -1,6 +1,7 @@
 {
   "realm": "myrealm",
   "enabled": true,
+  "sslRequired": "NONE",
   "displayName": "My Realm",
   "clients": [
     {
