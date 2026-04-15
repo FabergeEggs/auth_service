@@ -1,8 +1,23 @@
 {
   "realm": "myrealm",
   "enabled": true,
-  "sslRequired": "NONE",
+  "sslRequired": "external",
   "displayName": "My Realm",
+  "verifyEmail": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "smtpServer": {
+    "host": "mailhog",
+    "port": "1025",
+    "from": "noreply@myapp.local",
+    "fromDisplayName": "My App Auth",
+    "ssl": "false",
+    "starttls": "false",
+    "auth": "false",
+    "envelopeFrom": ""
+  },
   "clients": [
     {
       "clientId": "auth-service",
@@ -11,8 +26,61 @@
       "serviceAccountsEnabled": true,
       "directAccessGrantsEnabled": true,
       "standardFlowEnabled": true,
-      "redirectUris": ["*"],
+      "redirectUris": [
+        "http://localhost:3000/*",
+        "http://localhost:8000/*"
+      ],
+      "webOrigins": ["http://localhost:3000"],
       "secret": "nmeYwMzWRHuLb7V5iCnF9T8vQ2TlW3af"
+    },
+    {
+      "clientId": "admin-cli",
+      "enabled": true,
+      "publicClient": true,
+      "directAccessGrantsEnabled": true
     }
-  ]
+  ],
+  "users": [
+    {
+      "username": "admin",
+      "enabled": true,
+      "email": "admin@myapp.local",
+      "firstName": "Admin",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "myadmin",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["admin"],
+      "emailVerified": true
+    }
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "admin",
+        "description": "Administrator role"
+      },
+      {
+        "name": "user",
+        "description": "Regular user role"
+      }
+    ]
+  },
+  "requiredActions": [
+    {
+      "alias": "VERIFY_EMAIL",
+      "name": "Verify Email",
+      "providerId": "VERIFY_EMAIL",
+      "enabled": true,
+      "defaultAction": true,
+      "priority": 10
+    }
+  ],
+  "attributes": {
+    "email_verified_required": "true"
+  }
 }

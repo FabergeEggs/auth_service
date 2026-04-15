@@ -1,120 +1,175 @@
 import logging
-from fastapi import Depends, FastAPI, Header, HTTPException
-from fastapi.middleware.cors import CORSMiddleware   # <-- добавлен импорт
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from httpx import HTTPStatusError
-
-from src.adapters.keycloak_adapter import KeycloakConflictError, TokenVerifier
-from src.api.dto import (
-    LoginRequestDTO,
-    LogoutRequestDTO,
-    MeResponseDTO,
-    RefreshTokenDTO,
-    RegisterRequestDTO,
-    RegisterResponseDTO,
-    TokenResponseDTO,
-)
-from src.service.auth_service import AuthService
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from src.adapters.keycloak_adapter import KeycloakUnavailableError
+from src.api.dto import LoginRequestDTO, MeResponseDTO, RegisterRequestDTO, RegisterResponseDTO
+from src.service.auth_service import AuthService, UserAlreadyExistsError
+from src.config import settings
 
 logger = logging.getLogger("auth_service.api")
+limiter = Limiter(key_func=get_remote_address)
 
-def create_app(auth_service: AuthService, token_verifier: TokenVerifier) -> FastAPI:
-    app = FastAPI(title="Auth Service")
+router = APIRouter(prefix="/api/v1")
 
-    # Настройка CORS – теперь здесь
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["http://localhost:3000"],  # или ["*"] для разработки
-        allow_credentials=True,
-        allow_methods=["*"],        # вместо ошибочного URL
-        allow_headers=["*"],        # вместо ошибочного URL
-    )
 
-    async def get_current_claims(authorization: str = Header(default="")) -> dict:
-        if not authorization.startswith("Bearer "):
-            raise HTTPException(status_code=401, detail="Missing bearer token")
-        token = authorization.removeprefix("Bearer ").strip()
-        return await token_verifier.verify(token)
+async def get_auth_service(request: Request) -> AuthService:
+    return request.app.state.auth_service
 
-    def get_auth_service() -> AuthService:
-        return auth_service
 
-    @app.post("/auth/register", response_model=RegisterResponseDTO)
-    async def register(
-        payload: RegisterRequestDTO,
-        business: AuthService = Depends(get_auth_service),
-    ) -> RegisterResponseDTO:
-        try:
-            user_id = await business.register(
-                email=payload.email,
-                password=payload.password,
-                first_name=payload.first_name,
-                last_name=payload.last_name,
-                phone=payload.phone,
-                about=payload.about,
-            )
-            return RegisterResponseDTO(user_id=user_id)
-        except KeycloakConflictError:
-            raise HTTPException(status_code=409, detail="User already exists")
-        except HTTPStatusError as exc:
-            logger.warning("Registration failed: %s", exc.response.text)
-            raise HTTPException(
-                status_code=exc.response.status_code,
-                detail=f"Registration failed: {exc.response.text}",
-            )
-        except Exception:
-            logger.exception("Unexpected registration error")
-            raise HTTPException(status_code=500, detail="Internal error")
+async def get_token_verifier(request: Request):
+    return request.app.state.token_verifier
 
-    @app.post("/auth/login", response_model=TokenResponseDTO)
-    async def login(
-        payload: LoginRequestDTO,
-        business: AuthService = Depends(get_auth_service),
-    ) -> TokenResponseDTO:
-        try:
-            data = await business.login(login=payload.login, password=payload.password)
-            return TokenResponseDTO(**data)
-        except HTTPStatusError as exc:
-            detail = "Invalid credentials"
+
+async def get_current_claims(
+    request: Request,   
+    authorization: str = Header(default="")
+) -> dict:
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(401, "Missing bearer token")
+    token = authorization.removeprefix("Bearer ").strip()
+    verifier = await get_token_verifier(request)
+    try:
+        return await verifier.verify(token)
+    except ValueError as e:
+        raise HTTPException(401, str(e))
+
+
+@router.post("/auth/register", response_model=RegisterResponseDTO)
+@limiter.limit("3/minute")
+async def register(payload: RegisterRequestDTO, request: Request):
+    business = await get_auth_service(request)
+    try:
+        uid = await business.register(
+            email=payload.email, password=payload.password,
+            first_name=payload.first_name, last_name=payload.last_name,
+            phone=payload.phone, about=payload.about
+        )
+        return RegisterResponseDTO(user_id=uid)
+    except UserAlreadyExistsError:
+        raise HTTPException(409, "User already exists")
+    except HTTPStatusError as e:
+        if e.response.status_code == 400:
             try:
-                err = exc.response.json()
-                if isinstance(err, dict) and err.get("error_description"):
-                    detail = f"Invalid credentials ({err.get('error', 'error')}: {err['error_description']})"
+                error_data = e.response.json()
+                error_msg = error_data.get("error_description", "Invalid password policy")
+                raise HTTPException(400, f"Registration failed: {error_msg}")
             except Exception:
-                pass
-            raise HTTPException(status_code=401, detail=detail)
+                logger.warning("Keycloak returned 400 but response is not JSON: %s", e.response.text)
+                raise HTTPException(400, "Registration failed: invalid data")
+        raise HTTPException(e.response.status_code, "Registration failed")
+    except KeycloakUnavailableError:
+        raise HTTPException(503, "Authentication service temporarily unavailable")
+    except Exception:
+        logger.exception("Unexpected register error")
+        raise HTTPException(500, "Internal error")
 
-    @app.post("/auth/refresh", response_model=TokenResponseDTO)
-    async def refresh(
-        payload: RefreshTokenDTO,
-        business: AuthService = Depends(get_auth_service),
-    ) -> TokenResponseDTO:
+
+@router.post("/auth/login")
+@limiter.limit("5/minute")
+async def login(request: Request, payload: LoginRequestDTO):
+    business = await get_auth_service(request)
+    try:
+        data = await business.login(login=payload.login, password=payload.password)
+        logger.info("Login success", extra={"event": "login_success"})
+        resp = JSONResponse({
+            "access_token": data["access_token"],
+            "expires_in": data["expires_in"],
+            "refresh_expires_in": data.get("refresh_expires_in"),
+            "token_type": data.get("token_type", "bearer"),
+            "scope": data.get("scope")
+        })
+        max_age = data.get("refresh_expires_in", settings.refresh_token_max_age)
+        is_production = (settings.environment == "production")
+        if max_age > 0:
+            resp.set_cookie(
+                "refresh_token", data["refresh_token"],
+                httponly=True, secure=is_production, samesite="lax",
+                max_age=max_age, path="/api/v1/auth"
+            )
+        return resp
+    except KeycloakUnavailableError:
+        raise HTTPException(503, "Authentication service temporarily unavailable")
+    except HTTPStatusError:
+        logger.warning("Login failed")
+        raise HTTPException(401, "Invalid credentials")
+
+
+@router.post("/auth/refresh")
+@limiter.limit("10/minute")
+async def refresh(request: Request):
+    business = await get_auth_service(request)
+    token = request.cookies.get("refresh_token")
+    if not token:
+        raise HTTPException(401, "No refresh token")
+    try:
+        data = await business.refresh(token)
+        resp = JSONResponse({
+            "access_token": data["access_token"],
+            "expires_in": data["expires_in"],
+            "refresh_expires_in": data.get("refresh_expires_in"),
+            "token_type": data.get("token_type", "bearer"),
+            "scope": data.get("scope")
+        })
+        if "refresh_token" in data:
+            max_age = data.get("refresh_expires_in", settings.refresh_token_max_age)
+            is_production = (settings.environment == "production")
+            resp.set_cookie(
+                "refresh_token", data["refresh_token"],
+                httponly=True, secure=is_production, samesite="lax",
+                max_age=max_age, path="/api/v1/auth"
+            )
+        return resp
+    except HTTPStatusError:
+        resp = JSONResponse({"detail": "Invalid refresh token"}, status_code=401)
+        is_production = (settings.environment == "production")
+        resp.delete_cookie(
+            "refresh_token", path="/api/v1/auth",
+            httponly=True, secure=is_production, samesite="lax"
+        )
+        return resp
+    except KeycloakUnavailableError:
+        raise HTTPException(503, "Authentication service temporarily unavailable")
+
+@router.post("/auth/logout")
+@limiter.limit("5/minute")
+async def logout(request: Request):
+    business = await get_auth_service(request)
+    token = request.cookies.get("refresh_token")
+    resp = JSONResponse({"status": "ok"})
+    if token:
         try:
-            data = await business.refresh(payload.refresh_token)
-            return TokenResponseDTO(**data)
+            await business.logout(token)
         except HTTPStatusError:
-            raise HTTPException(status_code=401, detail="Invalid refresh token")
+            pass
+        except KeycloakUnavailableError:
+            raise HTTPException(503, "Authentication service temporarily unavailable")
+        finally:
+            is_production = (settings.environment == "production")
+            resp.delete_cookie(
+                "refresh_token", path="/api/v1/auth",
+                httponly=True, secure=is_production, samesite="lax"
+            )
+    return resp
 
-    @app.post("/auth/logout")
-    async def logout(
-        payload: LogoutRequestDTO,
-        business: AuthService = Depends(get_auth_service),
-    ) -> JSONResponse:
-        try:
-            await business.logout(payload.refresh_token)
-            return JSONResponse({"status": "ok"})
-        except HTTPStatusError:
-            raise HTTPException(status_code=400, detail="Logout failed")
 
-    @app.get("/auth/me", response_model=MeResponseDTO)
-    async def me(
-        claims: dict = Depends(get_current_claims),
-        business: AuthService = Depends(get_auth_service),
-    ) -> MeResponseDTO:
+@router.post("/auth/logout-all")
+@limiter.limit("5/minute")
+async def logout_all(request: Request, claims: dict = Depends(get_current_claims)):
+    business = await get_auth_service(request)
+    if not claims.get("sub"):
+        raise HTTPException(400, "No user id")
+    await business.logout_all_sessions(claims["sub"])
+    return JSONResponse({"status": "ok", "message": "All sessions terminated"})
+
+
+@router.get("/auth/me", response_model=MeResponseDTO)
+@limiter.limit("20/minute")
+async def me(request: Request, claims: dict = Depends(get_current_claims)):
+    try:
+        business = await get_auth_service(request)
         return MeResponseDTO(**business.me_payload(claims))
-
-    @app.get("/health")
-    async def health_check() -> JSONResponse:
-        return JSONResponse({"status": "healthy"})
-
-    return app
+    except KeycloakUnavailableError:
+        raise HTTPException(503, "Authentication service temporarily unavailable")
