@@ -20,10 +20,13 @@ services:
       KC_HEALTH_ENABLED: "true"
       KC_METRICS_ENABLED: "true"
       KC_LOG_LEVEL: DEBUG
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+      KC_STRICT_TRANSPORT_SECURITY: "disabled"
     volumes:
       - ./keycloak-export:/opt/keycloak/data/import:ro 
       - keycloak_data:/opt/keycloak/data
-    command: start-dev --import-realm
+    command: start-dev --import-realm --hostname-strict=false --http-enabled=true
     depends_on:
       mailhog:
         condition: service_started

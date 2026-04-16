@@ -156,8 +156,23 @@ class KeycloakAdapter:
         
         location = resp.headers.get("Location")
         if location:
-            return location.split("/")[-1]
+            user_id = location.split("/")[-1]
+            await self._send_verification_email(user_id, token)
+            return user_id
         raise Exception("No user id returned")
+    
+    async def _send_verification_email(self, user_id: str, token: str) -> None:
+        """Отправить письмо для верификации email"""
+        try:
+            await self._retry_request(
+                "PUT",
+                f"{self.admin_users_url}/{user_id}/execute-actions-email",
+                headers={"Authorization": f"Bearer {token}"},
+                json=["VERIFY_EMAIL"]
+            )
+            logger.info(f"Verification email sent to user {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to send verification email: {e}")
 
     async def login_with_email(self, email: str, password: str) -> dict:
         return await self._login_with_username(email, password)
@@ -209,22 +224,38 @@ class KeycloakAdapter:
 
     async def reset_password_with_action_token(self, action_token: str, new_password: str) -> None:
         """
-        Завершает сброс пароля, используя action token.
-        Эндпоинт Keycloak: POST /realms/{realm}/login-actions/reset-credentials
+        Сброс пароля через action token.
+        Для Keycloak 26+ используем Admin API вместо публичного эндпоинта.
         """
-        # URL для сброса пароля по токену (без аутентификации)
-        reset_url = f"{self.token_url.split('/protocol')[0]}/login-actions/reset-credentials"
+        # Декодируем токен чтобы получить userId (без проверки подписи)
+        import base64
+        import json
+        
+        # JWT состоит из 3 частей: header.payload.signature
+        payload = action_token.split('.')[1]
+        # Добавляем padding если нужно
+        payload += '=' * (4 - len(payload) % 4)
+        decoded = base64.b64decode(payload).decode('utf-8')
+        claims = json.loads(decoded)
+        user_id = claims.get('sub')
+        
+        if not user_id:
+            raise ValueError("No user id in action token")
+        
+        # Используем Admin API для сброса пароля
+        token = await self._get_admin_token()
+        reset_url = f"{self.admin_users_url}/{user_id}/reset-password"
         data = {
-            "key": action_token,
-            "password": new_password,
-            "password-confirm": new_password,
+            "type": "password",
+            "value": new_password,
+            "temporary": False
         }
-        try:
-            await self._retry_request("POST", reset_url, data=data)
-        except httpx.HTTPStatusError as e:
-            if 400 <= e.response.status_code < 500:
-                logger.error(f"Keycloak error response: {e.response.status_code} - {e.response.text}")
-                raise
+        await self._retry_request(
+            "PUT", 
+            reset_url,
+            headers={"Authorization": f"Bearer {token}"},
+            json=data
+        )
 
 
     async def logout(self, refresh_token: str) -> None:

@@ -3,6 +3,7 @@
   "enabled": true,
   "sslRequired": "none",
   "displayName": "My Realm",
+  "frontendUrl": "http://localhost:8082",
   "verifyEmail": true,
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
@@ -55,6 +56,9 @@
         }
       ],
       "realmRoles": ["admin"],
+      "clientRoles": {
+        "realm-management": ["realm-admin"]
+      },
       "emailVerified": true
     }
   ],
