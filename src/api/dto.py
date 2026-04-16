@@ -1,6 +1,13 @@
 from typing import Optional, Dict, List, Any
 from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field
 
+class ForgotPasswordRequestDTO(BaseModel):
+    email: EmailStr
+
+class ResetPasswordRequestDTO(BaseModel):
+    key: str
+    new_password: str = Field(..., min_length=6)
+
 class RegisterRequestDTO(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=6)

@@ -17,11 +17,9 @@ services:
       KC_EMAIL_AUTH_ENABLED: "false"
       KC_EMAIL_SSL_ENABLED: "false"
       KC_EMAIL_STARTTLS_ENABLED: "false"
-      # Добавить healthcheck через встроенный механизм Keycloak
       KC_HEALTH_ENABLED: "true"
       KC_METRICS_ENABLED: "true"
       KC_LOG_LEVEL: DEBUG
-      KC_LOG_CONSOLE_OUTPUT: default
     volumes:
       - ./keycloak-export:/opt/keycloak/data/import:ro 
       - keycloak_data:/opt/keycloak/data
@@ -42,8 +40,8 @@ services:
     image: mailhog/mailhog:latest
     container_name: mailhog
     ports:
-      - "1025:1025"  # SMTP
-      - "8025:8025"  # Web UI
+      - "1025:1025"
+      - "8025:8025"
     volumes:
       - mailhog_data:/maildir
     networks:
@@ -55,7 +53,7 @@ services:
     ports:
       - "8000:8000"
     env_file:
-      - .env  # ← читать из .env файла
+      - .env
     depends_on:
       keycloak:
         condition: service_started

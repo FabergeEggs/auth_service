@@ -36,8 +36,10 @@ async def lifespan(app: FastAPI):
         admin_password=settings.admin_password,
         admin_client_id=settings.admin_client_id,
         admin_token_url=settings.admin_token_url,
-        realm=settings.realm  
+        realm=settings.realm,
+        frontend_url=settings.frontend_url
     )
+
     token_verifier = TokenVerifier(
         jwks_url=settings.jwks_url,
         issuer=settings.issuer,

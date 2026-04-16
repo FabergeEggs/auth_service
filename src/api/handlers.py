@@ -5,7 +5,8 @@ from httpx import HTTPStatusError
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from src.adapters.keycloak_adapter import KeycloakUnavailableError
-from src.api.dto import LoginRequestDTO, MeResponseDTO, RegisterRequestDTO, RegisterResponseDTO
+from src.api.dto import LoginRequestDTO, MeResponseDTO, RegisterRequestDTO
+from src.api.dto import RegisterResponseDTO, ResetPasswordRequestDTO, ForgotPasswordRequestDTO
 from src.service.auth_service import AuthService, UserAlreadyExistsError
 from src.config import settings
 
@@ -96,6 +97,31 @@ async def login(request: Request, payload: LoginRequestDTO):
         logger.warning("Login failed")
         raise HTTPException(401, "Invalid credentials")
 
+@router.post("/auth/forgot-password")
+@limiter.limit("3/minute")
+async def forgot_password(payload: ForgotPasswordRequestDTO, request: Request):
+    """
+    Инициирует сброс пароля: отправляет пользователю письмо со ссылкой на фронтенд.
+    """
+    business = await get_auth_service(request)
+    await business.forgot_password(payload.email)
+    return {"message": "If the email exists, a password reset link has been sent"}
+
+@router.post("/auth/reset-password")
+@limiter.limit("5/minute")
+async def reset_password(payload: ResetPasswordRequestDTO, request: Request):
+    """
+    Завершает сброс пароля, используя одноразовый ключ (action token).
+    """
+    business = await get_auth_service(request)
+    try:
+        await business.reset_password(payload.key, payload.new_password)
+        return {"message": "Password has been reset successfully"}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except KeycloakUnavailableError:
+        raise HTTPException(503, "Authentication service temporarily unavailable")
+
 
 @router.post("/auth/refresh")
 @limiter.limit("10/minute")
@@ -164,12 +190,3 @@ async def logout_all(request: Request, claims: dict = Depends(get_current_claims
     await business.logout_all_sessions(claims["sub"])
     return JSONResponse({"status": "ok", "message": "All sessions terminated"})
 
-
-@router.get("/auth/me", response_model=MeResponseDTO)
-@limiter.limit("20/minute")
-async def me(request: Request, claims: dict = Depends(get_current_claims)):
-    try:
-        business = await get_auth_service(request)
-        return MeResponseDTO(**business.me_payload(claims))
-    except KeycloakUnavailableError:
-        raise HTTPException(503, "Authentication service temporarily unavailable")

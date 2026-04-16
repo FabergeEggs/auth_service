@@ -75,3 +75,24 @@ class AuthService:
             "client_roles": client_roles,
             "raw_claims": claims,
         }
+    
+    async def forgot_password(self, email: str) -> None:
+        """
+        Отправляет email со ссылкой для сброса пароля через Keycloak.
+        """
+        user = await self._auth_provider.get_user_by_email(email)
+        if not user:
+            # Не раскрываем существование пользователя
+            logger.info("Forgot password requested for non-existent email", extra={"email": email})
+            return
+
+        # Keycloak сам отправит письмо со ссылкой на фронтенд (шаблон изменён)
+        await self._auth_provider.send_reset_password_email(user["id"])
+        logger.info("Password reset email sent", extra={"user_id": user["id"]})
+
+    async def reset_password(self, action_token: str, new_password: str) -> None:
+        """
+        Сбрасывает пароль, используя action token (параметр 'key' из письма).
+        """
+        await self._auth_provider.reset_password_with_action_token(action_token, new_password)
+        logger.info("Password reset successful")

@@ -1,7 +1,7 @@
 {
   "realm": "myrealm",
   "enabled": true,
-  "sslRequired": "external",
+  "sslRequired": "none",
   "displayName": "My Realm",
   "verifyEmail": true,
   "loginWithEmailAllowed": true,

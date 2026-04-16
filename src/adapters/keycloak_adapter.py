@@ -29,8 +29,9 @@ class KeycloakAdapter:
                  admin_username: str = "admin", admin_password: str = "admin",
                  admin_client_id: str = "admin-cli",
                  admin_token_url: str = "http://keycloak:8080/realms/master/protocol/openid-connect/token",
-                 realm: str = "myrealm"):
+                 realm: str = "myrealm", frontend_url: str = "http://localhost:3000"):
         self.token_url = token_url
+        self.frontend_url = frontend_url
         self.logout_url = logout_url
         self.admin_users_url = admin_users_url
         self.client_id = client_id
@@ -186,6 +187,45 @@ class KeycloakAdapter:
             data["client_secret"] = self.client_secret
         resp = await self._retry_request("POST", self.token_url, data=data)
         return resp.json()
+    
+    async def send_reset_password_email(self, user_id: str) -> None:
+        """
+        Вызывает Keycloak API для отправки письма со ссылкой сброса пароля.
+        """
+        token: str = await self._get_admin_token()
+        try:
+            await self._retry_request(
+                "PUT",
+                f"{self.admin_users_url}/{user_id}/execute-actions-email",
+                headers={"Authorization": f"Bearer {token}"},
+                json=["UPDATE_PASSWORD"],
+                # params={"redirect_uri": f"{self.frontend_url}/reset-password"}  # можно передать redirect_uri
+            )
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.warning("User %s not found when sending reset email", user_id)
+            else:
+                raise
+
+    async def reset_password_with_action_token(self, action_token: str, new_password: str) -> None:
+        """
+        Завершает сброс пароля, используя action token.
+        Эндпоинт Keycloak: POST /realms/{realm}/login-actions/reset-credentials
+        """
+        # URL для сброса пароля по токену (без аутентификации)
+        reset_url = f"{self.token_url.split('/protocol')[0]}/login-actions/reset-credentials"
+        data = {
+            "key": action_token,
+            "password": new_password,
+            "password-confirm": new_password,
+        }
+        try:
+            await self._retry_request("POST", reset_url, data=data)
+        except httpx.HTTPStatusError as e:
+            if 400 <= e.response.status_code < 500:
+                logger.error(f"Keycloak error response: {e.response.status_code} - {e.response.text}")
+                raise
+
 
     async def logout(self, refresh_token: str) -> None:
         data = {

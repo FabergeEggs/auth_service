@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     admin_password: str = Field(..., alias="KEYCLOAK_ADMIN_PASSWORD")
     admin_client_id: str = Field("admin-cli", alias="KEYCLOAK_ADMIN_CLIENT_ID")
 
+    frontend_url: str = "http://localhost:3000"
+
     refresh_token_max_age: int = 2592000
 
     @property

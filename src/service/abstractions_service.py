@@ -45,6 +45,17 @@ class AuthProviderInterface(Protocol):
         pass
     
     @abstractmethod
+    async def send_reset_password_email(self, user_id: str) -> None:
+        """Отправить письмо для сброса пароля."""
+        pass
+
+    @abstractmethod
+    async def reset_password_with_action_token(self, action_token: str, new_password: str) -> None:
+        """Сбросить пароль по одноразовому токену."""
+        pass
+
+    
+    @abstractmethod
     async def logout(self, refresh_token: str) -> None:
         """Выход (отзыв refresh token)"""
         pass
