@@ -62,8 +62,11 @@ services:
         condition: service_started
       mailhog:
         condition: service_started
+      redpanda:
+        condition: service_healthy
     networks:
       - auth-network
+      - profile-network
 
   redis:
     image: redis:7-alpine
@@ -72,10 +75,40 @@ services:
       - "6379:6379"
     networks:
       - auth-network
+    
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    container_name: redpanda
+    command:
+      - redpanda
+      - start
+      - --smp 1
+      - --overprovisioned
+      - --kafka-addr 0.0.0.0:9092
+      - --advertise-kafka-addr redpanda:9092
+      - --pandaproxy-addr 0.0.0.0:8085
+      - --advertise-pandaproxy-addr redpanda:8085
+      - --set
+      - redpanda.auto_create_topics_enabled=true
+    ports:
+      - "9092:9092"
+      - "9644:9644"
+      - "8085:8085"
+    networks:
+      - auth-network
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
 networks:
   auth-network:
     driver: bridge
+  profile-network:
+    external: true
+    name: profile_service_profile-network
   
 volumes:
   mailhog_data:

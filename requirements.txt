@@ -8,3 +8,4 @@ slowapi==0.1.9
 python-multipart==0.0.9
 prometheus-client==0.20.0  
 email-validator
+aiokafka>=0.8.0

@@ -9,8 +9,9 @@ class UserAlreadyExistsError(Exception):
     pass
 
 class AuthService:
-    def __init__(self, auth_provider: AuthProviderInterface):
+    def __init__(self, auth_provider: AuthProviderInterface, event_producer=None):
         self._auth_provider = auth_provider
+        self._event_producer = event_producer
 
     async def register(self, email: str, password: str, first_name: str,
                        last_name: Optional[str] = None, phone: Optional[str] = None,
@@ -19,6 +20,7 @@ class AuthService:
             raise UserAlreadyExistsError(f"User {email} already exists")
 
         try:
+            
             user_id = await self._auth_provider.create_user(
                 username=email, email=email, password=password,
                 first_name=first_name, last_name=last_name, phone=phone, about=about
@@ -32,6 +34,22 @@ class AuthService:
                 first_name=first_name, last_name=last_name, phone=phone, about=about
             )
         logger.info("User registered", extra={"event": "register", "user_id": user_id})
+        logger.info("User registered", extra={"event": "register", "user_id": user_id})
+        
+        if self._event_producer:
+            try:
+                await self._event_producer.send_event("keycloak.user.registered", {
+                    "user_id": user_id,
+                    "email": email,
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "phone": phone,
+                    "about": about
+                })
+                logger.info(f"UserRegistered event sent for {user_id}")
+            except Exception as e:
+                logger.error(f"Failed to send UserRegistered event: {e}", exc_info=True)
+        
         return user_id
 
     async def login(self, login: str, password: str) -> dict:

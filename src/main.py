@@ -10,17 +10,10 @@ from src.adapters.keycloak_adapter import KeycloakAdapter, TokenVerifier
 from src.service.auth_service import AuthService
 from src.api.handlers import router, limiter
 from src.config import settings
+from src.adapters.kafka_producer import KafkaEventProducer  
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-async def get_auth_service(request: Request) -> AuthService:
-    return request.app.state.auth_service
-
-
-async def get_token_verifier(request: Request) -> TokenVerifier:
-    return request.app.state.token_verifier
 
 
 @asynccontextmanager
@@ -45,16 +38,34 @@ async def lifespan(app: FastAPI):
         issuer=settings.issuer,
         audience=settings.audience
     )
-    auth_service = AuthService(adapter)
+    
+    event_producer = None
+    if settings.kafka_enabled:
+        event_producer = KafkaEventProducer(settings.redpanda_bootstrap_servers)
+        try:
+            await event_producer.start()
+            logger.info("Kafka producer started")
+        except Exception as e:
+            logger.error(f"Failed to start Kafka producer: {e}")
+            event_producer = None
+    
+    auth_service = AuthService(adapter, event_producer)  # ← передать producer
 
     # Сохраняем в app.state
     app.state.auth_service = auth_service
     app.state.token_verifier = token_verifier
     app.state.adapter = adapter
+    app.state.event_producer = event_producer  # ← сохранить для остановки
 
     yield
 
     # Закрытие клиентов
+    if app.state.event_producer:
+        try:
+            await app.state.event_producer.stop()
+        except Exception as e:
+            logger.error("Error closing event producer: %s", e)
+    
     try:
         await adapter.close()
     except Exception as e:
@@ -66,6 +77,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan, title="Auth Service", version="1.0.0")
+
 
 # CORS
 app.add_middleware(
