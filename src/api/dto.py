@@ -1,6 +1,9 @@
 from typing import Optional, Dict, List, Any
 from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field
 
+class VerifyEmailRequestDTO(BaseModel):
+    key: str
+
 class ForgotPasswordRequestDTO(BaseModel):
     email: EmailStr
 

@@ -114,3 +114,28 @@ class AuthService:
         """
         await self._auth_provider.reset_password_with_action_token(action_token, new_password)
         logger.info("Password reset successful")
+
+    async def verify_email(self, action_token: str) -> None:
+        """Подтверждает email по action token"""
+        import base64
+        import json
+        
+        # Декодируем токен
+        payload = action_token.split('.')[1]
+        payload += '=' * (4 - len(payload) % 4)
+        decoded = base64.b64decode(payload).decode('utf-8')
+        claims = json.loads(decoded)
+        user_id = claims.get('sub')
+        
+        if not user_id:
+            raise ValueError("Invalid action token")
+        
+        # Подтверждаем через Admin API
+        token = await self._auth_provider._get_admin_token()
+        await self._auth_provider._retry_request(
+            "PUT",
+            f"{self._auth_provider.admin_users_url}/{user_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"emailVerified": True, "requiredActions": []}
+        )
+        logger.info(f"Email verified for user {user_id}")

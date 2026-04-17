@@ -190,3 +190,18 @@ async def logout_all(request: Request, claims: dict = Depends(get_current_claims
     await business.logout_all_sessions(claims["sub"])
     return JSONResponse({"status": "ok", "message": "All sessions terminated"})
 
+from src.api.dto import VerifyEmailRequestDTO
+
+@router.post("/auth/verify-email")
+@limiter.limit("5/minute")
+async def verify_email(payload: VerifyEmailRequestDTO, request: Request):
+    """Подтверждение email по токену из письма"""
+    business = await get_auth_service(request)
+    try:
+        await business.verify_email(payload.key)
+        return {"message": "Email verified successfully"}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.error(f"Email verification failed: {e}")
+        raise HTTPException(500, "Verification failed")
