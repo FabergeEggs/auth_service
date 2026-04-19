@@ -34,6 +34,7 @@ class TokenResponseDTO(BaseModel):
     refresh_expires_in: int | None = None
     token_type: str = "bearer"
     scope: str | None = None
+    user_id: str | None = None
 
 class MeResponseDTO(BaseModel):
     sub: str

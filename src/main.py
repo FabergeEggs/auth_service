@@ -96,6 +96,11 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.include_router(router)
 
 
+# Вспомогательная функция для получения auth_service
+async def get_auth_service(request: Request) -> AuthService:
+    return request.app.state.auth_service
+
+
 @app.get("/health")
 async def health_check(request: Request):
     business = await get_auth_service(request)

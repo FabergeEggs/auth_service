@@ -74,13 +74,14 @@ async def login(request: Request, payload: LoginRequestDTO):
     business = await get_auth_service(request)
     try:
         data = await business.login(login=payload.login, password=payload.password)
-        logger.info("Login success", extra={"event": "login_success"})
+        logger.info("Login success", extra={"event": "login_success", "user_id": data.get("user_id")})
         resp = JSONResponse({
             "access_token": data["access_token"],
             "expires_in": data["expires_in"],
             "refresh_expires_in": data.get("refresh_expires_in"),
             "token_type": data.get("token_type", "bearer"),
-            "scope": data.get("scope")
+            "scope": data.get("scope"),
+            "user_id": data.get("user_id") 
         })
         max_age = data.get("refresh_expires_in", settings.refresh_token_max_age)
         is_production = (settings.environment == "production")

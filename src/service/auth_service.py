@@ -1,4 +1,6 @@
 import logging
+import base64
+import json
 from typing import Optional, Dict, Any
 from src.service.abstractions_service import AuthProviderInterface
 from src.service.abstractions_service import AuthProviderConflictError
@@ -16,24 +18,23 @@ class AuthService:
     async def register(self, email: str, password: str, first_name: str,
                        last_name: Optional[str] = None, phone: Optional[str] = None,
                        about: Optional[str] = None) -> str:
-        if await self._auth_provider.get_user_by_email(email):
+        if await self._auth_provider.get_user_by_username(email):
             raise UserAlreadyExistsError(f"User {email} already exists")
 
         try:
-            
             user_id = await self._auth_provider.create_user(
                 username=email, email=email, password=password,
                 first_name=first_name, last_name=last_name, phone=phone, about=about
             )
         except AuthProviderConflictError:
-            existing = await self._auth_provider.get_user_by_email(email)
+            existing = await self._auth_provider.get_user_by_username(email)
             if existing:
                 raise UserAlreadyExistsError(f"User {email} already exists")
             user_id = await self._auth_provider.create_user(
                 username=email, email=email, password=password,
                 first_name=first_name, last_name=last_name, phone=phone, about=about
             )
-        logger.info("User registered", extra={"event": "register", "user_id": user_id})
+        
         logger.info("User registered", extra={"event": "register", "user_id": user_id})
         
         if self._event_producer:
@@ -53,9 +54,27 @@ class AuthService:
         return user_id
 
     async def login(self, login: str, password: str) -> dict:
-        if "@" in login:
-            return await self._auth_provider.login_with_email(login, password)
-        return await self._auth_provider.login_with_username(login, password)
+
+        tokens = await self._auth_provider.login_with_username(login, password)
+        # Пытаемся получить пользователя по username
+        user = await self._auth_provider.get_user_by_username(login)
+        
+        # Добавляем user_id в ответ
+        if user:
+            tokens["user_id"] = user.get("id")
+        else:
+            # Fallback: извлекаем из access_token
+            try:
+                payload = tokens["access_token"].split('.')[1]
+                payload += '=' * (4 - len(payload) % 4)
+                decoded = base64.b64decode(payload).decode('utf-8')
+                claims = json.loads(decoded)
+                tokens["user_id"] = claims.get("sub")
+            except Exception as e:
+                logger.warning(f"Failed to extract user_id from token: {e}")
+                tokens["user_id"] = None
+        
+        return tokens
 
     async def refresh(self, refresh_token: str) -> dict:
         return await self._auth_provider.refresh_token(refresh_token)
@@ -98,13 +117,12 @@ class AuthService:
         """
         Отправляет email со ссылкой для сброса пароля через Keycloak.
         """
-        user = await self._auth_provider.get_user_by_email(email)
+        user = await self._auth_provider.get_user_by_username(email)
         if not user:
             # Не раскрываем существование пользователя
             logger.info("Forgot password requested for non-existent email", extra={"email": email})
             return
 
-        # Keycloak сам отправит письмо со ссылкой на фронтенд (шаблон изменён)
         await self._auth_provider.send_reset_password_email(user["id"])
         logger.info("Password reset email sent", extra={"user_id": user["id"]})
 
@@ -117,25 +135,5 @@ class AuthService:
 
     async def verify_email(self, action_token: str) -> None:
         """Подтверждает email по action token"""
-        import base64
-        import json
-        
-        # Декодируем токен
-        payload = action_token.split('.')[1]
-        payload += '=' * (4 - len(payload) % 4)
-        decoded = base64.b64decode(payload).decode('utf-8')
-        claims = json.loads(decoded)
-        user_id = claims.get('sub')
-        
-        if not user_id:
-            raise ValueError("Invalid action token")
-        
-        # Подтверждаем через Admin API
-        token = await self._auth_provider._get_admin_token()
-        await self._auth_provider._retry_request(
-            "PUT",
-            f"{self._auth_provider.admin_users_url}/{user_id}",
-            headers={"Authorization": f"Bearer {token}"},
-            json={"emailVerified": True, "requiredActions": []}
-        )
-        logger.info(f"Email verified for user {user_id}")
+        await self._auth_provider.verify_email(action_token)
+        logger.info("Email verified successfully")

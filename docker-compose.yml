@@ -113,3 +113,4 @@ networks:
 volumes:
   mailhog_data:
   keycloak_data:
+  redpanda_data:

@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 from typing import Optional, Protocol, Any
 
 
-
 class AuthProviderConflictError(Exception):
     """Пользователь уже существует в провайдере"""
     pass
@@ -25,14 +24,10 @@ class AuthProviderInterface(Protocol):
         pass
     
     @abstractmethod
-    async def get_user_by_email(self, email: str) -> Optional[dict[str, Any]]:
-        """Получить пользователя по email"""
+    async def get_user_by_username(self, username: str) -> Optional[dict[str, Any]]:
+        """Получить пользователя по username"""
         pass
     
-    @abstractmethod
-    async def login_with_email(self, email: str, password: str) -> dict[str, Any]:
-        """Залогинить по email"""
-        pass
     
     @abstractmethod
     async def login_with_username(self, username: str, password: str) -> dict:
@@ -54,6 +49,15 @@ class AuthProviderInterface(Protocol):
         """Сбросить пароль по одноразовому токену."""
         pass
 
+    @abstractmethod
+    async def send_verification_email(self, user_id: str) -> None:
+        """Отправить письмо для верификации email"""
+        pass
+
+    @abstractmethod
+    async def verify_email(self, action_token: str) -> None:
+        """Подтвердить email по action token"""
+        pass
     
     @abstractmethod
     async def logout(self, refresh_token: str) -> None:
@@ -74,5 +78,3 @@ class AuthProviderInterface(Protocol):
     async def close(self) -> None:
         """Закрыть соединения"""
         pass
-
-

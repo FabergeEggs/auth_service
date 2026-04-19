@@ -52,7 +52,7 @@ class KeycloakAdapter:
     async def health_check(self) -> bool:
         try:
             base = self.token_url.split("/realms")[0]
-            resp = await self._client.get(f"{base}/realms/{self.realm}")  # ← использовать self.realm
+            resp = await self._client.get(f"{base}/realms/{self.realm}")
             return resp.status_code < 500
         except Exception:
             return False
@@ -109,15 +109,17 @@ class KeycloakAdapter:
             raise RuntimeError("Retry loop ended without exception")
         raise last_exc
 
-    async def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
-        token: str = await self._get_admin_token()  # ← добавить тип
+
+    async def get_user_by_username(self, username: str) -> Optional[Dict[str, Any]]:
+        """Получить пользователя по username"""
+        token: str = await self._get_admin_token()
         resp = await self._retry_request(
             "GET", self.admin_users_url,
             headers={"Authorization": f"Bearer {token}"},
-            params={"email": email, "exact": "true"}
+            params={"username": username, "exact": "true"}
         )
         users = resp.json()
-        return cast(Optional[Dict[str, Any]], users[0]) if users else None  # ← cast
+        return cast(Optional[Dict[str, Any]], users[0]) if users else None
 
     async def create_user(self, username: str, email: str, password: str,
                       first_name: Optional[str] = None, last_name: Optional[str] = None,
@@ -157,12 +159,13 @@ class KeycloakAdapter:
         location = resp.headers.get("Location")
         if location:
             user_id = location.split("/")[-1]
-            await self._send_verification_email(user_id, token)
+            await self.send_verification_email(user_id)
             return user_id
         raise Exception("No user id returned")
     
-    async def _send_verification_email(self, user_id: str, token: str) -> None:
+    async def send_verification_email(self, user_id: str) -> None:
         """Отправить письмо для верификации email"""
+        token = await self._get_admin_token()
         try:
             await self._retry_request(
                 "PUT",
@@ -173,9 +176,42 @@ class KeycloakAdapter:
             logger.info(f"Verification email sent to user {user_id}")
         except Exception as e:
             logger.error(f"Failed to send verification email: {e}")
+            raise
 
-    async def login_with_email(self, email: str, password: str) -> dict:
-        return await self._login_with_username(email, password)
+    async def verify_email(self, action_token: str) -> None:
+        """Подтверждает email по action token"""
+        import base64
+        import json
+        
+        try:
+            # Декодируем токен чтобы получить userId
+            parts = action_token.split('.')
+            if len(parts) != 3:
+                raise ValueError("Invalid token format")
+            
+            payload = parts[1]
+            # Добавляем padding если нужно
+            payload += '=' * (4 - len(payload) % 4)
+            decoded = base64.b64decode(payload).decode('utf-8')
+            claims = json.loads(decoded)
+            user_id = claims.get('sub')
+            
+            if not user_id:
+                raise ValueError("No user id in action token")
+            
+            # Подтверждаем через Admin API
+            token = await self._get_admin_token()
+            await self._retry_request(
+                "PUT",
+                f"{self.admin_users_url}/{user_id}",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"emailVerified": True, "requiredActions": []}
+            )
+            logger.info(f"Email verified for user {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to verify email: {e}")
+            raise
+
 
     async def login_with_username(self, username: str, password: str) -> dict:
         return await self._login_with_username(username, password)
@@ -214,7 +250,6 @@ class KeycloakAdapter:
                 f"{self.admin_users_url}/{user_id}/execute-actions-email",
                 headers={"Authorization": f"Bearer {token}"},
                 json=["UPDATE_PASSWORD"],
-                # params={"redirect_uri": f"{self.frontend_url}/reset-password"}  # можно передать redirect_uri
             )
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
@@ -225,13 +260,11 @@ class KeycloakAdapter:
     async def reset_password_with_action_token(self, action_token: str, new_password: str) -> None:
         """
         Сброс пароля через action token.
-        Для Keycloak 26+ используем Admin API вместо публичного эндпоинта.
         """
-        # Декодируем токен чтобы получить userId (без проверки подписи)
         import base64
         import json
         
-        # JWT состоит из 3 частей: header.payload.signature
+        # Декодируем токен чтобы получить userId
         payload = action_token.split('.')[1]
         # Добавляем padding если нужно
         payload += '=' * (4 - len(payload) % 4)
@@ -257,7 +290,6 @@ class KeycloakAdapter:
             json=data
         )
 
-
     async def logout(self, refresh_token: str) -> None:
         data = {
             "client_id": self.client_id,
@@ -282,15 +314,16 @@ class KeycloakAdapter:
         except Exception as e:
             logger.error("Failed to logout all sessions for user %s: %s", user_id, e)
 
+
 class TokenVerifier:
     def __init__(self, jwks_url: str, issuer: str, audience: str):
         self.jwks_url = jwks_url
         self.issuer = issuer
         self.audience = audience
         self._client = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0))
-        self._jwks_cache: Optional[Dict[str, Any]] = None  # ← кеш
-        self._jwks_cache_time: float = 0.0  # ← время кеша
-        self._cache_ttl: int = 600  # ← TTL 10 минут
+        self._jwks_cache: Optional[Dict[str, Any]] = None
+        self._jwks_cache_time: float = 0.0
+        self._cache_ttl: int = 600
 
     async def close(self):
         await self._client.aclose()
