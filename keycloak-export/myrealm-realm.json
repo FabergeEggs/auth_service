@@ -84,6 +84,7 @@
     }
   ],
   "attributes": {
-    "email_verified_required": "true"
+    "email_verified_required": "true",
+    "frontendUrl": "http://localhost:3000"
   }
 }
