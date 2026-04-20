@@ -89,7 +89,7 @@ async def login(request: Request, payload: LoginRequestDTO):
             resp.set_cookie(
                 "refresh_token", data["refresh_token"],
                 httponly=True, secure=is_production, samesite="lax",
-                max_age=max_age, path="/api/v1/auth"
+                max_age=max_age, path="/"
             )
         return resp
     except KeycloakUnavailableError:
@@ -146,14 +146,14 @@ async def refresh(request: Request):
             resp.set_cookie(
                 "refresh_token", data["refresh_token"],
                 httponly=True, secure=is_production, samesite="lax",
-                max_age=max_age, path="/api/v1/auth"
+                max_age=max_age, path="/"
             )
         return resp
     except HTTPStatusError:
         resp = JSONResponse({"detail": "Invalid refresh token"}, status_code=401)
         is_production = (settings.environment == "production")
         resp.delete_cookie(
-            "refresh_token", path="/api/v1/auth",
+            "refresh_token", path="/",
             httponly=True, secure=is_production, samesite="lax"
         )
         return resp
@@ -176,7 +176,7 @@ async def logout(request: Request):
         finally:
             is_production = (settings.environment == "production")
             resp.delete_cookie(
-                "refresh_token", path="/api/v1/auth",
+                "refresh_token", path="/",
                 httponly=True, secure=is_production, samesite="lax"
             )
     return resp
