@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 from httpx import HTTPStatusError
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from src.adapters.keycloak_adapter import KeycloakUnavailableError
+from src.adapters.keycloak_adapter import KeycloakUnavailableError, KeycloakError, InvalidTokenError
 from src.api.dto import LoginRequestDTO, MeResponseDTO, RegisterRequestDTO
 from src.api.dto import RegisterResponseDTO, ResetPasswordRequestDTO, ForgotPasswordRequestDTO
 from src.service.auth_service import AuthService, UserAlreadyExistsError
@@ -15,6 +15,8 @@ limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(prefix="/api/v1")
 
+async def get_settings(request: Request):
+    return request.app.state.settings
 
 async def get_auth_service(request: Request) -> AuthService:
     return request.app.state.auth_service
@@ -72,9 +74,12 @@ async def register(payload: RegisterRequestDTO, request: Request):
 @limiter.limit("5/minute")
 async def login(request: Request, payload: LoginRequestDTO):
     business = await get_auth_service(request)
+    settings = await get_settings(request)
+    
     try:
         data = await business.login(login=payload.login, password=payload.password)
         logger.info("Login success", extra={"event": "login_success", "user_id": data.get("user_id")})
+        
         resp = JSONResponse({
             "access_token": data["access_token"],
             "expires_in": data["expires_in"],
@@ -83,45 +88,24 @@ async def login(request: Request, payload: LoginRequestDTO):
             "scope": data.get("scope"),
             "user_id": data.get("user_id") 
         })
+        
         max_age = data.get("refresh_expires_in", settings.refresh_token_max_age)
-        is_production = (settings.environment == "production")
-        if max_age > 0:
-            resp.set_cookie(
-                "refresh_token", data["refresh_token"],
-                httponly=True, secure=is_production, samesite="lax",
-                max_age=max_age, path="/"
-            )
+        resp.set_cookie(
+            "refresh_token", 
+            data["refresh_token"],
+            httponly=True, 
+            secure=settings.secure_cookies, 
+            samesite="lax",
+            max_age=max_age, 
+            path="/",
+            domain=settings.cookie_domain
+        )
         return resp
     except KeycloakUnavailableError:
         raise HTTPException(503, "Authentication service temporarily unavailable")
     except HTTPStatusError:
         logger.warning("Login failed")
         raise HTTPException(401, "Invalid credentials")
-
-@router.post("/auth/forgot-password")
-@limiter.limit("3/minute")
-async def forgot_password(payload: ForgotPasswordRequestDTO, request: Request):
-    """
-    Инициирует сброс пароля: отправляет пользователю письмо со ссылкой на фронтенд.
-    """
-    business = await get_auth_service(request)
-    await business.forgot_password(payload.email)
-    return {"message": "If the email exists, a password reset link has been sent"}
-
-@router.post("/auth/reset-password")
-@limiter.limit("5/minute")
-async def reset_password(payload: ResetPasswordRequestDTO, request: Request):
-    """
-    Завершает сброс пароля, используя одноразовый ключ (action token).
-    """
-    business = await get_auth_service(request)
-    try:
-        await business.reset_password(payload.key, payload.new_password)
-        return {"message": "Password has been reset successfully"}
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-    except KeycloakUnavailableError:
-        raise HTTPException(503, "Authentication service temporarily unavailable")
 
 
 @router.post("/auth/refresh")
@@ -200,9 +184,50 @@ async def verify_email(payload: VerifyEmailRequestDTO, request: Request):
     business = await get_auth_service(request)
     try:
         await business.verify_email(payload.key)
-        return {"message": "Email verified successfully"}
-    except ValueError as e:
+        return {"message": "Email verified successfully. You can now login."}
+    except InvalidTokenError as e:
+        logger.warning(f"Invalid verification token: {e}")
         raise HTTPException(400, str(e))
+    except KeycloakError as e:
+        logger.error(f"Keycloak error during verification: {e}")
+        raise HTTPException(503, "Verification service temporarily unavailable")
     except Exception as e:
-        logger.error(f"Email verification failed: {e}")
+        logger.error(f"Email verification failed: {e}", exc_info=True)
         raise HTTPException(500, "Verification failed")
+
+
+@router.post("/auth/reset-password")
+@limiter.limit("5/minute")
+async def reset_password(payload: ResetPasswordRequestDTO, request: Request):
+    """
+    Завершает сброс пароля, используя одноразовый ключ (action token).
+    """
+    business = await get_auth_service(request)
+    try:
+        await business.reset_password(payload.key, payload.new_password)
+        return {"message": "Password has been reset successfully. You can now login with your new password."}
+    except InvalidTokenError as e:
+        logger.warning(f"Invalid reset token: {e}")
+        raise HTTPException(400, str(e))
+    except ValueError as e:
+        logger.warning(f"Invalid password: {e}")
+        raise HTTPException(400, str(e))
+    except KeycloakError as e:
+        logger.error(f"Keycloak error during password reset: {e}")
+        raise HTTPException(503, "Password reset service temporarily unavailable")
+    except Exception as e:
+        logger.error(f"Password reset failed: {e}", exc_info=True)
+        raise HTTPException(500, "Password reset failed")
+
+
+@router.post("/auth/forgot-password")
+@limiter.limit("3/minute")
+async def forgot_password(payload: ForgotPasswordRequestDTO, request: Request):
+    """
+    Инициирует сброс пароля: отправляет пользователю письмо со ссылкой на фронтенд.
+    """
+    business = await get_auth_service(request)
+    await business.forgot_password(payload.email)
+    return {"message": "If the email exists, a password reset link has been sent"}
+
+

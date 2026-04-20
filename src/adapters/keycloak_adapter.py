@@ -19,6 +19,18 @@ class KeycloakUnavailableError(Exception):
 class KeycloakConflictError(AuthProviderConflictError):
     pass
 
+class AuthServiceError(Exception):
+    pass
+
+class InvalidTokenError(AuthServiceError):
+    pass
+
+class UserNotFoundError(AuthServiceError):
+    pass
+
+class KeycloakError(AuthServiceError):
+    pass
+
 class KeycloakAdapter:
     MAX_RETRIES = 3
     RETRY_DELAY = 1.0
@@ -31,6 +43,7 @@ class KeycloakAdapter:
                  admin_token_url: str = "http://keycloak:8080/realms/master/protocol/openid-connect/token",
                  realm: str = "myrealm", frontend_url: str = "http://localhost:3000"):
         self.token_url = token_url
+        self.base_url = token_url.split("/realms")[0]
         self.frontend_url = frontend_url
         self.logout_url = logout_url
         self.admin_users_url = admin_users_url
@@ -179,39 +192,46 @@ class KeycloakAdapter:
             raise
 
     async def verify_email(self, action_token: str) -> None:
-        """Подтверждает email по action token"""
-        import base64
-        import json
+        """
+        Подтверждает email по action token.
+        Использует публичный endpoint Keycloak для верификации.
+        """
+        # Публичный endpoint Keycloak для обработки action tokens
+        verify_url = f"{self.base_url}/realms/{self.realm}/login-actions/action-token"
+        
+        # Данные для верификации
+        data = {
+            "token": action_token,
+            "client_id": self.client_id
+        }
+        
+        if self.client_secret:
+            data["client_secret"] = self.client_secret
         
         try:
-            # Декодируем токен чтобы получить userId
-            parts = action_token.split('.')
-            if len(parts) != 3:
-                raise ValueError("Invalid token format")
+            # Keycloak сам валидирует токен и подтверждает email
+            resp = await self._client.post(verify_url, data=data)
             
-            payload = parts[1]
-            # Добавляем padding если нужно
-            payload += '=' * (4 - len(payload) % 4)
-            decoded = base64.b64decode(payload).decode('utf-8')
-            claims = json.loads(decoded)
-            user_id = claims.get('sub')
-            
-            if not user_id:
-                raise ValueError("No user id in action token")
-            
-            # Подтверждаем через Admin API
-            token = await self._get_admin_token()
-            await self._retry_request(
-                "PUT",
-                f"{self.admin_users_url}/{user_id}",
-                headers={"Authorization": f"Bearer {token}"},
-                json={"emailVerified": True, "requiredActions": []}
-            )
-            logger.info(f"Email verified for user {user_id}")
-        except Exception as e:
-            logger.error(f"Failed to verify email: {e}")
-            raise
-
+            if resp.status_code == 200:
+                logger.info("Email verified successfully")
+                return
+            elif resp.status_code == 400:
+                # Анализируем ошибку
+                error_text = resp.text.lower()
+                if "expired" in error_text:
+                    raise InvalidTokenError("Verification token has expired")
+                elif "invalid" in error_text:
+                    raise InvalidTokenError("Invalid verification token")
+                else:
+                    raise InvalidTokenError(f"Verification failed: {resp.text}")
+            else:
+                resp.raise_for_status()
+                
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Email verification failed: {e}")
+            if e.response.status_code == 400:
+                raise InvalidTokenError("Invalid or expired verification token")
+            raise KeycloakError(f"Verification failed: {e}")
 
     async def login_with_username(self, username: str, password: str) -> dict:
         return await self._login_with_username(username, password)
@@ -238,6 +258,7 @@ class KeycloakAdapter:
             data["client_secret"] = self.client_secret
         resp = await self._retry_request("POST", self.token_url, data=data)
         return resp.json()
+
     
     async def send_reset_password_email(self, user_id: str) -> None:
         """
@@ -249,46 +270,58 @@ class KeycloakAdapter:
                 "PUT",
                 f"{self.admin_users_url}/{user_id}/execute-actions-email",
                 headers={"Authorization": f"Bearer {token}"},
+                params={"redirect_uri": f"{self.frontend_url}/reset-password"},
                 json=["UPDATE_PASSWORD"],
             )
+            logger.info(f"Password reset email sent to user {user_id}")
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
                 logger.warning("User %s not found when sending reset email", user_id)
-            else:
-                raise
+                raise UserNotFoundError(f"User {user_id} not found")
+            raise
 
     async def reset_password_with_action_token(self, action_token: str, new_password: str) -> None:
         """
         Сброс пароля через action token.
+        Использует публичный endpoint Keycloak для сброса пароля.
         """
-        import base64
-        import json
+        # Endpoint для сброса пароля через action token
+        reset_url = f"{self.base_url}/realms/{self.realm}/login-actions/reset-credentials"
         
-        # Декодируем токен чтобы получить userId
-        payload = action_token.split('.')[1]
-        # Добавляем padding если нужно
-        payload += '=' * (4 - len(payload) % 4)
-        decoded = base64.b64decode(payload).decode('utf-8')
-        claims = json.loads(decoded)
-        user_id = claims.get('sub')
-        
-        if not user_id:
-            raise ValueError("No user id in action token")
-        
-        # Используем Admin API для сброса пароля
-        token = await self._get_admin_token()
-        reset_url = f"{self.admin_users_url}/{user_id}/reset-password"
         data = {
-            "type": "password",
-            "value": new_password,
-            "temporary": False
+            "token": action_token,
+            "password-new": new_password,
+            "password-confirm": new_password,
+            "client_id": self.client_id
         }
-        await self._retry_request(
-            "PUT", 
-            reset_url,
-            headers={"Authorization": f"Bearer {token}"},
-            json=data
-        )
+        
+        if self.client_secret:
+            data["client_secret"] = self.client_secret
+        
+        try:
+            resp = await self._client.post(reset_url, data=data)
+            
+            if resp.status_code == 200:
+                logger.info("Password reset successful")
+                return
+            elif resp.status_code == 400:
+                error_text = resp.text.lower()
+                if "expired" in error_text:
+                    raise InvalidTokenError("Reset token has expired")
+                elif "invalid" in error_text:
+                    raise InvalidTokenError("Invalid reset token")
+                elif "password" in error_text:
+                    raise ValueError(f"Invalid password: {resp.text}")
+                else:
+                    raise InvalidTokenError(f"Password reset failed: {resp.text}")
+            else:
+                resp.raise_for_status()
+                
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Password reset failed: {e}")
+            if e.response.status_code == 400:
+                raise InvalidTokenError("Invalid or expired reset token")
+            raise KeycloakError(f"Password reset failed: {e}")
 
     async def logout(self, refresh_token: str) -> None:
         data = {
@@ -306,6 +339,7 @@ class KeycloakAdapter:
                 "DELETE", f"{self.admin_users_url}/{user_id}/sessions",
                 headers={"Authorization": f"Bearer {token}"}
             )
+            logger.info(f"All sessions terminated for user {user_id}")
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
                 logger.warning("User %s not found when terminating sessions", user_id)
@@ -313,6 +347,10 @@ class KeycloakAdapter:
                 raise
         except Exception as e:
             logger.error("Failed to logout all sessions for user %s: %s", user_id, e)
+            raise
+
+    
+    
 
 
 class TokenVerifier:

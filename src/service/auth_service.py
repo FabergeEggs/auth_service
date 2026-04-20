@@ -137,3 +137,8 @@ class AuthService:
         """Подтверждает email по action token"""
         await self._auth_provider.verify_email(action_token)
         logger.info("Email verified successfully")
+    
+    async def resend_verification_email(self, user_id: str) -> None:
+        """Повторно отправить письмо верификации"""
+        await self._auth_provider.send_verification_email(user_id)
+        logger.info(f"Verification email resent to user {user_id}")
