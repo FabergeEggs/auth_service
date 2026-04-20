@@ -1,7 +1,7 @@
 from aiokafka import AIOKafkaProducer
 import json
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 import logging
 
@@ -14,6 +14,8 @@ class KafkaEventProducer:
         self.producer: Optional[AIOKafkaProducer] = None
     
     async def start(self):
+        if self.producer is not None:
+            return
         self.producer = AIOKafkaProducer(
             bootstrap_servers=self.bootstrap_servers,
             value_serializer=lambda v: json.dumps(v).encode()
@@ -33,9 +35,12 @@ class KafkaEventProducer:
         event = {
             "event_id": str(uuid4()),
             "event_type": event_type,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "data": data
         }
+
+        # Validate payload before handing it off to the producer.
+        json.dumps(event)
         
         await self.producer.send(event_type, event)
         logger.info(f"Event sent: {event_type}", extra={"event_id": event["event_id"]})

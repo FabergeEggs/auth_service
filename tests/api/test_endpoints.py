@@ -1,9 +1,7 @@
-"""E2E тесты API эндпоинтов"""
 import pytest
+from httpx import HTTPStatusError, Response
 from unittest.mock import AsyncMock, patch
-from httpx import AsyncClient
-from src.service.auth_service import UserAlreadyExistsError
-from src.core.exceptions import InvalidTokenError
+from src.errors import InvalidTokenError, UserAlreadyExistsError
 
 pytestmark = pytest.mark.asyncio
 
@@ -12,7 +10,7 @@ class TestHealthEndpoint:
     
     async def test_health_check_healthy(self, client):
         """Тест успешного health check"""
-        with patch('main.get_auth_service') as mock_get_auth:
+        with patch('src.main.get_auth_service') as mock_get_auth:
             mock_auth = AsyncMock()
             mock_auth.health_check = AsyncMock(return_value=True)
             mock_get_auth.return_value = mock_auth
@@ -24,7 +22,7 @@ class TestHealthEndpoint:
     
     async def test_health_check_unhealthy(self, client):
         """Тест неуспешного health check"""
-        with patch('main.get_auth_service') as mock_get_auth:
+        with patch('src.main.get_auth_service') as mock_get_auth:
             mock_auth = AsyncMock()
             mock_auth.health_check = AsyncMock(return_value=False)
             mock_get_auth.return_value = mock_auth
@@ -102,7 +100,7 @@ class TestLoginEndpoint:
     
     async def test_login_invalid_credentials(self, client, test_login_data):
         """Тест неверных учетных данных"""
-        from httpx import HTTPStatusError, Response
+        
         
         with patch('src.api.handlers.get_auth_service') as mock_get_auth:
             mock_auth = AsyncMock()
@@ -182,23 +180,18 @@ class TestEmailVerificationEndpoints:
             assert response.status_code == 200
             assert "verified" in response.json()["message"].lower()
     
-    async def test_resend_verification_authenticated(self, authenticated_client):
-        """Тест повторной отправки верификации"""
+    async def test_verify_email_invalid_token(self, client):
+        """Тест верификации email с невалидным токеном"""
         with patch('src.api.handlers.get_auth_service') as mock_get_auth:
             mock_auth = AsyncMock()
-            mock_auth.resend_verification_email = AsyncMock()
+            mock_auth.verify_email = AsyncMock(side_effect=InvalidTokenError("Invalid token"))
             mock_get_auth.return_value = mock_auth
-            
-            response = await authenticated_client.post("/api/v1/auth/resend-verification")
-            
-            assert response.status_code == 200
-            assert "sent" in response.json()["message"].lower()
-    
-    async def test_resend_verification_unauthenticated(self, client):
-        """Тест повторной отправки без авторизации"""
-        response = await client.post("/api/v1/auth/resend-verification")
-        
-        assert response.status_code == 403  # Forbidden или 401 Unauthorized
+
+            response = await client.post("/api/v1/auth/verify-email", json={
+                "key": "invalid-verification-token"
+            })
+
+            assert response.status_code == 400
 
 class TestLogoutEndpoints:
     """Тесты эндпоинтов выхода"""

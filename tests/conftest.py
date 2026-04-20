@@ -1,22 +1,36 @@
-mport asyncio
-import pytest
-import pytest_asyncio
-from typing import AsyncGenerator, Dict, Any
-from unittest.mock import AsyncMock, MagicMock
-from faker import Faker
-from httpx import AsyncClient, ASGITransport
+"""Общие фикстуры для всех тестов"""
 import sys
 from pathlib import Path
 
-# Добавляем src в PYTHONPATH
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Добавляем корневую директорию проекта в PYTHONPATH
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
+import asyncio
+from datetime import UTC, datetime, timedelta
+import pytest
+import pytest_asyncio
+from typing import Dict, Any
+from unittest.mock import AsyncMock, MagicMock
+from httpx import AsyncClient, ASGITransport
+
+# Теперь импорты должны работать
 from main import app
 from src.service.auth_service import AuthService
-from src.adapters.keycloak_adapter import KeycloakAdapter
 
-# Инициализируем Faker
-fake = Faker()
+# Инициализируем Faker (если установлен)
+try:
+    from faker import Faker
+    fake = Faker()
+except ImportError:
+    # Fallback если faker не установлен
+    class FakeFallback:
+        def email(self): return "test@example.com"
+        def first_name(self): return "Test"
+        def last_name(self): return "User"
+        def phone_number(self): return "+1234567890"
+        def text(self, max_nb_chars=100): return "Test text"
+    fake = FakeFallback()
 
 @pytest.fixture(scope="session")
 def event_loop():
@@ -28,12 +42,30 @@ def event_loop():
 @pytest_asyncio.fixture
 async def client():
     """HTTP клиент для тестирования API"""
+    app.state.settings = MagicMock(
+        refresh_token_max_age=2592000,
+        secure_cookies=False,
+        cookie_domain=None,
+        environment="test",
+    )
+    app.state.auth_service = AsyncMock(spec=AuthService)
+    app.state.token_verifier = AsyncMock()
+
     transport = ASGITransport(app=app)
     async with AsyncClient(
         transport=transport,
         base_url="http://testserver"
     ) as ac:
         yield ac
+
+
+@pytest_asyncio.fixture
+async def authenticated_client(client, mock_token_claims):
+    """Аутентифицированный HTTP клиент"""
+    client.headers["Authorization"] = "Bearer test-token"
+    app.state.token_verifier.verify = AsyncMock(return_value=mock_token_claims)
+    yield client
+    client.headers.pop("Authorization", None)
 
 @pytest.fixture
 def mock_auth_provider():
@@ -64,15 +96,24 @@ def mock_auth_provider():
     return mock
 
 @pytest.fixture
+def mock_event_producer():
+    """Мок Kafka продюсера"""
+    mock = AsyncMock()
+    mock.start = AsyncMock()
+    mock.stop = AsyncMock()
+    mock.send_event = AsyncMock()
+    return mock
+
+@pytest.fixture
 def test_user_data() -> Dict[str, Any]:
     """Тестовые данные пользователя"""
     return {
-        "email": "test@example.com",
+        "email": fake.email(),
         "password": "Test123!@#",
-        "first_name": "Test",
-        "last_name": "User",
-        "phone": "+1234567890",
-        "about": "Test user"
+        "first_name": fake.first_name(),
+        "last_name": fake.last_name(),
+        "phone": fake.phone_number()[:20],
+        "about": fake.text(max_nb_chars=100)
     }
 
 @pytest.fixture
@@ -86,8 +127,8 @@ def test_login_data(test_user_data) -> Dict[str, str]:
 @pytest.fixture
 def mock_token_claims() -> Dict[str, Any]:
     """Мок claims из JWT токена"""
-    from datetime import datetime, timedelta
-    
+    now = datetime.now(UTC)
+
     return {
         "sub": "test-user-id-123",
         "email": "test@example.com",
@@ -108,8 +149,8 @@ def mock_token_claims() -> Dict[str, Any]:
             "phone": ["+1234567890"],
             "about": ["Test about me"]
         },
-        "exp": int((datetime.utcnow() + timedelta(hours=1)).timestamp()),
-        "iat": int(datetime.utcnow().timestamp()),
+        "exp": int((now + timedelta(hours=1)).timestamp()),
+        "iat": int(now.timestamp()),
         "iss": "http://keycloak:8080/realms/myrealm",
         "aud": "auth-service"
     }

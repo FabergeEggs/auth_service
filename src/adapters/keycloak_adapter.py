@@ -4,32 +4,19 @@ import asyncio
 from typing import Optional, Dict, Any, cast
 import httpx
 from jose import jwt, JWTError, ExpiredSignatureError
-from src.service.abstractions_service import AuthProviderConflictError
+from src.errors import (
+    InvalidTokenError,
+    UserNotFoundError,
+    KeycloakError,
+    KeycloakUnavailableError,
+    KeycloakConflictError,
+)
 
 logger = logging.getLogger(__name__)
 
 class KeycloakUserAttributes:
     PHONE = "phone"
     ABOUT = "about"
-
-class KeycloakUnavailableError(Exception):
-    """Keycloak недоступен или ошибка аутентификации администратора"""
-    pass
-
-class KeycloakConflictError(AuthProviderConflictError):
-    pass
-
-class AuthServiceError(Exception):
-    pass
-
-class InvalidTokenError(AuthServiceError):
-    pass
-
-class UserNotFoundError(AuthServiceError):
-    pass
-
-class KeycloakError(AuthServiceError):
-    pass
 
 class KeycloakAdapter:
     MAX_RETRIES = 3

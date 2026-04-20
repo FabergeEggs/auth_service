@@ -4,10 +4,21 @@ from fastapi.responses import JSONResponse
 from httpx import HTTPStatusError
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from src.adapters.keycloak_adapter import KeycloakUnavailableError, KeycloakError, InvalidTokenError
-from src.api.dto import LoginRequestDTO, MeResponseDTO, RegisterRequestDTO
-from src.api.dto import RegisterResponseDTO, ResetPasswordRequestDTO, ForgotPasswordRequestDTO
-from src.service.auth_service import AuthService, UserAlreadyExistsError
+from src.api.dto import (
+    LoginRequestDTO,
+    RegisterRequestDTO,
+    RegisterResponseDTO,
+    ResetPasswordRequestDTO,
+    ForgotPasswordRequestDTO,
+    VerifyEmailRequestDTO,
+)
+from src.errors import (
+    InvalidTokenError,
+    KeycloakError,
+    KeycloakUnavailableError,
+    UserAlreadyExistsError,
+)
+from src.service.auth_service import AuthService
 from src.config import settings
 
 logger = logging.getLogger("auth_service.api")
@@ -174,8 +185,6 @@ async def logout_all(request: Request, claims: dict = Depends(get_current_claims
         raise HTTPException(400, "No user id")
     await business.logout_all_sessions(claims["sub"])
     return JSONResponse({"status": "ok", "message": "All sessions terminated"})
-
-from src.api.dto import VerifyEmailRequestDTO
 
 @router.post("/auth/verify-email")
 @limiter.limit("5/minute")

@@ -1,15 +1,15 @@
 from typing import Optional, Dict, List, Any
 from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field
 
-class VerifyEmailRequestDTO(BaseModel):
-    key: str
-
 class ForgotPasswordRequestDTO(BaseModel):
     email: EmailStr
 
 class ResetPasswordRequestDTO(BaseModel):
-    key: str
+    key: str = Field(..., min_length=1)
     new_password: str = Field(..., min_length=6)
+
+class VerifyEmailRequestDTO(BaseModel):
+    key: str = Field(..., min_length=1)
 
 class RegisterRequestDTO(BaseModel):
     email: EmailStr
@@ -25,7 +25,7 @@ class RegisterResponseDTO(BaseModel):
 
 class LoginRequestDTO(BaseModel):
     login: str = Field(..., min_length=3, validation_alias=AliasChoices("login", "email"))
-    password: str
+    password: str = Field(..., min_length=1)
 
 class TokenResponseDTO(BaseModel):
     model_config = ConfigDict(extra="ignore")

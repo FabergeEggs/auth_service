@@ -1,16 +1,12 @@
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from typing import Optional, Protocol, Any
 
-
-class AuthProviderConflictError(Exception):
-    """Пользователь уже существует в провайдере"""
-    pass
 
 class AuthProviderInterface(Protocol):
     """Интерфейс для провайдера аутентификации"""
     
     @abstractmethod
-    async def create_user(
+    async def create_user(  
         self,
         username: str,
         email: str,
@@ -19,62 +15,37 @@ class AuthProviderInterface(Protocol):
         last_name: Optional[str] = None,
         phone: Optional[str] = None,
         about: Optional[str] = None,
-    ) -> str:
-        """Создать пользователя, вернуть user_id"""
-        pass
+    ) -> str: ...
     
     @abstractmethod
-    async def get_user_by_username(self, username: str) -> Optional[dict[str, Any]]:
-        """Получить пользователя по username"""
-        pass
-    
+    async def get_user_by_username(self, username: str) -> Optional[dict[str, Any]]: ...  
     
     @abstractmethod
-    async def login_with_username(self, username: str, password: str) -> dict:
-        """Залогинить по username"""
-        pass
+    async def login_with_username(self, username: str, password: str) -> dict: ...  
     
     @abstractmethod
-    async def refresh_token(self, refresh_token: str) -> dict:
-        """Обновить токен"""
-        pass
+    async def refresh_token(self, refresh_token: str) -> dict: ...  
     
     @abstractmethod
-    async def send_reset_password_email(self, user_id: str) -> None:
-        """Отправить письмо для сброса пароля."""
-        pass
+    async def send_reset_password_email(self, user_id: str) -> None: ... 
 
     @abstractmethod
-    async def reset_password_with_action_token(self, action_token: str, new_password: str) -> None:
-        """Сбросить пароль по одноразовому токену."""
-        pass
+    async def reset_password_with_action_token(self, action_token: str, new_password: str) -> None: ...  
 
     @abstractmethod
-    async def send_verification_email(self, user_id: str) -> None:
-        """Отправить письмо для верификации email"""
-        pass
+    async def send_verification_email(self, user_id: str) -> None: ... 
 
     @abstractmethod
-    async def verify_email(self, action_token: str) -> None:
-        """Подтвердить email по action token"""
-        pass
+    async def verify_email(self, action_token: str) -> None: ...  
     
     @abstractmethod
-    async def logout(self, refresh_token: str) -> None:
-        """Выход (отзыв refresh token)"""
-        pass
+    async def logout(self, refresh_token: str) -> None: ... 
     
     @abstractmethod
-    async def logout_all_sessions(self, user_id: str) -> None:
-        """Отозвать ВСЕ сессии пользователя"""
-        pass
+    async def logout_all_sessions(self, user_id: str) -> None: ... 
     
     @abstractmethod
-    async def health_check(self) -> bool:
-        """Проверить доступность провайдера"""
-        pass
+    async def health_check(self) -> bool: ...  
     
     @abstractmethod
-    async def close(self) -> None:
-        """Закрыть соединения"""
-        pass
+    async def close(self) -> None: ...  

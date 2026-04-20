@@ -18,8 +18,8 @@ class Settings(BaseSettings):
     client_id: str = Field("myclient", alias="KEYCLOAK_CLIENT_ID")
     client_secret: Optional[str] = Field(None, alias="KEYCLOAK_CLIENT_SECRET")
 
-    admin_username: str = Field(..., alias="KEYCLOAK_ADMIN_USERNAME")
-    admin_password: str = Field(..., alias="KEYCLOAK_ADMIN_PASSWORD")
+    admin_username: str = Field("admin", alias="KEYCLOAK_ADMIN_USERNAME")
+    admin_password: str = Field("admin", alias="KEYCLOAK_ADMIN_PASSWORD")
     admin_client_id: str = Field("admin-cli", alias="KEYCLOAK_ADMIN_CLIENT_ID")
 
 
@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:3000"
 
     refresh_token_max_age: int = 2592000
+    database_url: Optional[str] = Field(None, alias="DATABASE_URL")
 
     @property
     def token_url(self) -> str:

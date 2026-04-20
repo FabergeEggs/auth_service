@@ -1,6 +1,7 @@
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, Request
+from pathlib import Path
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
@@ -10,7 +11,7 @@ from src.adapters.keycloak_adapter import KeycloakAdapter, TokenVerifier
 from src.service.auth_service import AuthService
 from src.api.handlers import router, limiter
 from src.config import settings
-from src.adapters.kafka_producer import KafkaEventProducer  
+from src.adapters.kafka_producer import KafkaEventProducer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -18,6 +19,11 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if settings.database_url:
+        migrations_dir = Path(__file__).resolve().parents[1] / "migrations"
+        await run_migrations(settings.database_url, migrations_dir)
+        logger.info("Auth service migrations applied")
+
     # Инициализация адаптеров
     adapter = KeycloakAdapter(
         token_url=settings.token_url,
@@ -54,7 +60,6 @@ async def lifespan(app: FastAPI):
     # Сохраняем в app.state
     app.state.auth_service = auth_service
     app.state.token_verifier = token_verifier
-    app.state.adapter = adapter
     app.state.event_producer = event_producer  # ← сохранить для остановки
 
     yield

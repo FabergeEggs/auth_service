@@ -66,7 +66,6 @@ services:
         condition: service_healthy
     networks:
       - auth-network
-      - profile-network
 
   redis:
     image: redis:7-alpine
@@ -106,9 +105,6 @@ services:
 networks:
   auth-network:
     driver: bridge
-  profile-network:
-    external: true
-    name: profile_service_profile-network
   
 volumes:
   mailhog_data:

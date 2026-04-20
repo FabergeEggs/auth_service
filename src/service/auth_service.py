@@ -1,14 +1,11 @@
 import logging
 import base64
 import json
-from typing import Optional, Dict, Any
+from typing import Optional
 from src.service.abstractions_service import AuthProviderInterface
-from src.service.abstractions_service import AuthProviderConflictError
+from src.errors import AuthProviderConflictError, UserAlreadyExistsError
 
 logger = logging.getLogger(__name__)
-
-class UserAlreadyExistsError(Exception):
-    pass
 
 class AuthService:
     def __init__(self, auth_provider: AuthProviderInterface, event_producer=None):
@@ -88,31 +85,6 @@ class AuthService:
     async def health_check(self) -> bool:
         return await self._auth_provider.health_check()
 
-    def _get_attr(self, claims: dict, attr: str) -> Optional[str]:
-        val = claims.get("attributes", {}).get(attr)
-        return val[0] if isinstance(val, list) and val else None
-
-    def me_payload(self, claims: dict) -> Dict[str, Any]:
-        resource_access = claims.get("resource_access", {})
-        client_roles = {
-            cid: acc.get("roles", [])
-            for cid, acc in resource_access.items()
-            if acc.get("roles")
-        }
-        return {
-            "sub": claims.get("sub"),
-            "email": claims.get("email"),
-            "preferred_username": claims.get("preferred_username"),
-            "name": claims.get("name"),
-            "given_name": claims.get("given_name"),
-            "family_name": claims.get("family_name"),
-            "phone": self._get_attr(claims, "phone"),
-            "about": self._get_attr(claims, "about"),
-            "realm_roles": claims.get("realm_access", {}).get("roles", []),
-            "client_roles": client_roles,
-            "raw_claims": claims,
-        }
-    
     async def forgot_password(self, email: str) -> None:
         """
         Отправляет email со ссылкой для сброса пароля через Keycloak.
@@ -138,7 +110,3 @@ class AuthService:
         await self._auth_provider.verify_email(action_token)
         logger.info("Email verified successfully")
     
-    async def resend_verification_email(self, user_id: str) -> None:
-        """Повторно отправить письмо верификации"""
-        await self._auth_provider.send_verification_email(user_id)
-        logger.info(f"Verification email resent to user {user_id}")
