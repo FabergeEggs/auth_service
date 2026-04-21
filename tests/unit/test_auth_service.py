@@ -253,16 +253,18 @@ class TestMePayload:
 class TestAuthServicePasswordChange:
     """Тесты для смены пароля"""
     
+
     @pytest.mark.asyncio
     async def test_request_password_change_sends_email(self, mock_auth_provider):
         """Тест отправки письма для смены пароля"""
-        mock_auth_provider.get_user_by_email.return_value = {"id": "user-123"}
+        mock_auth_provider.get_user_by_username = AsyncMock(return_value={"id": "user-123"})
+        mock_auth_provider.send_reset_password_email = AsyncMock()
         
         auth_service = AuthService(mock_auth_provider)
         await auth_service.forgot_password("test@example.com")
         
         mock_auth_provider.send_reset_password_email.assert_awaited_once_with("user-123")
-    
+
     @pytest.mark.asyncio
     async def test_request_password_change_unknown_email(self, mock_auth_provider):
         """Тест с несуществующим email (не должен падать)"""

@@ -584,25 +584,22 @@ async def forgot_password(payload: ForgotPasswordRequestDTO, request: Request):
     }
 )
 @limiter.limit("3/minute")
-async def request_password_change(
+async def password_change(
     request: Request,
     claims: dict = Depends(get_current_claims)
 ):
-    """
-    Запрос на смену пароля для ЗАЛОГИНЕННОГО пользователя.
-    Отправляет письмо с Action Token.
-    """
-    email = claims.get("email")
-    
-    if not email:
-        raise HTTPException(401, "Email not found in token")
-    payload = ForgotPasswordRequestDTO(email=str(email))
-    
-    business = await get_auth_service(request)
-    await business.forgot_password(payload.email)
-    
-    return {"message": "Password change link has been sent to your email"}
+    try:
+        email = claims.get("email")
+        if not email:
+            raise HTTPException(400, "Email not found in token")
+        
+        business = await get_auth_service(request)
+        await business.forgot_password(email)
+        return {"message": "Password change link has been sent to your email"}
+    except KeycloakUnavailableError:
+        raise HTTPException(503, "Service temporarily unavailable")
 
+        
 @router.get(
     "/auth/me", 
     response_model=MeResponseDTO,

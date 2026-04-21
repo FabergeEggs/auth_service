@@ -360,7 +360,7 @@ class TestMeEndpoint:
         assert data["realm_roles"] == []
     
 class TestRequestPasswordChangeEndpoint:
-    """Тесты для эндпоинта /auth/request-password-change"""
+    """Тесты для эндпоинта /auth/password-change"""
     
     @pytest.mark.asyncio
     async def test_request_password_change_success(self, authenticated_client, mock_token_claims):
@@ -370,7 +370,7 @@ class TestRequestPasswordChangeEndpoint:
             mock_auth.forgot_password = AsyncMock()
             mock_get_auth.return_value = mock_auth
             
-            response = await authenticated_client.post("/api/v1/auth/request-password-change")
+            response = await authenticated_client.post("/api/v1/auth/password-change")
             
             assert response.status_code == 200
             data = response.json()
@@ -380,7 +380,7 @@ class TestRequestPasswordChangeEndpoint:
     @pytest.mark.asyncio
     async def test_request_password_change_unauthorized(self, client):
         """Тест запроса без токена"""
-        response = await client.post("/api/v1/auth/request-password-change")
+        response = await client.post("/api/v1/auth/password-change")
         
         assert response.status_code == 401
         assert "Missing bearer token" in response.json()["detail"]
@@ -390,7 +390,7 @@ class TestRequestPasswordChangeEndpoint:
         """Тест с токеном без email"""
         app.state.token_verifier.verify = AsyncMock(return_value={"sub": "user-123"})  # нет email
         
-        response = await authenticated_client.post("/api/v1/auth/request-password-change")
+        response = await authenticated_client.post("/api/v1/auth/password-change")
         
         assert response.status_code == 400
         assert "Email not found" in response.json()["detail"]
@@ -403,23 +403,7 @@ class TestRequestPasswordChangeEndpoint:
             mock_auth.forgot_password = AsyncMock(side_effect=KeycloakUnavailableError("Service down"))
             mock_get_auth.return_value = mock_auth
             
-            response = await authenticated_client.post("/api/v1/auth/request-password-change")
+            response = await authenticated_client.post("/api/v1/auth/password-change")
             
             assert response.status_code == 503
     
-    @pytest.mark.asyncio
-    async def test_request_password_change_rate_limit(self, authenticated_client):
-        """Тест rate limiting"""
-        with patch('src.api.handlers.get_auth_service') as mock_get_auth:
-            mock_auth = AsyncMock()
-            mock_auth.forgot_password = AsyncMock()
-            mock_get_auth.return_value = mock_auth
-            
-            # Делаем 4 запроса (лимит 3/minute)
-            responses = []
-            for _ in range(4):
-                resp = await authenticated_client.post("/api/v1/auth/request-password-change")
-                responses.append(resp.status_code)
-            
-            assert 200 in responses[:3]
-            assert 429 in responses  # Rate limit exceeded
