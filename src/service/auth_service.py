@@ -1,7 +1,7 @@
 import logging
 import base64
 import json
-from typing import Optional
+from typing import Optional, Any
 from src.service.abstractions_service import AuthProviderInterface
 from src.errors import AuthProviderConflictError, UserAlreadyExistsError
 
@@ -110,3 +110,66 @@ class AuthService:
         await self._auth_provider.verify_email(action_token)
         logger.info("Email verified successfully")
     
+    def me_payload(self, claims: dict) -> dict[str, Any]:
+        """
+        Формирует ответ для эндпоинта /auth/me из claims токена.
+        
+        Args:
+            claims: декодированный payload из JWT токена
+            
+        Returns:
+            Dict с данными пользователя в формате MeResponseDTO
+            
+        Raises:
+            ValueError: если claims пустой или отсутствует sub
+            TypeError: если claims не словарь
+        """
+        # Проверка входных данных
+        if claims is None:
+            raise ValueError("Claims cannot be empty")
+        
+        if not isinstance(claims, dict):
+            raise TypeError(f"Claims must be dict, got {type(claims).__name__}")
+        
+        if not claims:
+            raise ValueError("Claims cannot be empty")
+        
+        # Проверка обязательного sub
+        sub = claims.get("sub")
+        if not sub:
+            raise ValueError("Invalid claims: missing 'sub' field")
+        
+        # Извлекаем атрибуты пользователя
+        attributes = claims.get("attributes", {})
+        
+        def get_attr(attr_name: str) -> Optional[str]:
+            """Извлечь атрибут из claims (может быть списком)"""
+            val = attributes.get(attr_name)
+            if isinstance(val, list) and val:
+                return val[0]
+            return val if isinstance(val, str) else None
+        
+        # Роли из realm_access
+        realm_roles = claims.get("realm_access", {}).get("roles", [])
+        
+        # Роли из клиентов (resource_access)
+        resource_access = claims.get("resource_access", {})
+        client_roles = {
+            client_id: access.get("roles", [])
+            for client_id, access in resource_access.items()
+            if isinstance(access, dict) and access.get("roles")
+        }
+        
+        return {
+            "sub": sub,
+            "email": claims.get("email"),
+            "preferred_username": claims.get("preferred_username"),
+            "name": claims.get("name"),
+            "given_name": claims.get("given_name"),
+            "family_name": claims.get("family_name"),
+            "phone": get_attr("phone"),
+            "about": get_attr("about"),
+            "realm_roles": realm_roles,
+            "client_roles": client_roles,
+            "raw_claims": claims
+        }

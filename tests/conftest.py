@@ -18,6 +18,36 @@ from httpx import AsyncClient, ASGITransport
 from main import app
 from src.service.auth_service import AuthService
 
+
+import pytest
+from src.service.auth_service import AuthService
+from tests.mocks import MockAuthProvider
+
+@pytest.fixture
+def mock_auth_provider():
+    """Мок для AuthProvider"""
+    return MockAuthProvider()
+
+@pytest.fixture
+def auth_service(mock_auth_provider):
+    """Фикстура AuthService с моком"""
+    return AuthService(auth_provider=mock_auth_provider)
+
+@pytest.fixture
+def sample_claims():
+    """Пример claims для тестов"""
+    return {
+        "sub": "123e4567-e89b-12d3-a456-426614174000",
+        "email": "test@example.com",
+        "preferred_username": "testuser",
+        "name": "Test User",
+        "given_name": "Test",
+        "family_name": "User",
+        "realm_access": {"roles": ["user"]},
+        "resource_access": {
+            "account": {"roles": ["view-profile"]}
+        }
+    }
 # Инициализируем Faker (если установлен)
 try:
     from faker import Faker

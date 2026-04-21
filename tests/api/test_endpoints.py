@@ -1,8 +1,13 @@
 import pytest
 from httpx import HTTPStatusError, Response
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from src.errors import InvalidTokenError, UserAlreadyExistsError
+from main import app
+import sys
+from pathlib import Path
 
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
 pytestmark = pytest.mark.asyncio
 
 class TestHealthEndpoint:
@@ -142,7 +147,6 @@ class TestPasswordResetEndpoints:
             response = await client.post("/api/v1/auth/reset-password", json={
                 "key": "valid-token",
                 "new_password": "NewTest123!@#",
-                "confirm_password": "NewTest123!@#"
             })
             
             assert response.status_code == 200
@@ -254,3 +258,103 @@ class TestRefreshTokenEndpoint:
         response = await client.post("/api/v1/auth/refresh")
         
         assert response.status_code == 401
+
+class TestMeEndpoint:
+    """Тесты для эндпоинта /auth/me"""
+    
+    @pytest.mark.asyncio
+    async def test_get_me_success(self, authenticated_client, mock_token_claims):
+        """Тест успешного получения данных пользователя"""
+        # Мокаем возврат данных от auth_service
+        app.state.auth_service.me_payload = MagicMock(return_value={
+            "sub": mock_token_claims["sub"],
+            "email": mock_token_claims["email"],
+            "preferred_username": mock_token_claims["preferred_username"],
+            "name": mock_token_claims["name"],
+            "given_name": mock_token_claims["given_name"],
+            "family_name": mock_token_claims["family_name"],
+            "phone": "+1234567890",
+            "about": "Test about me",
+            "realm_roles": ["user"],
+            "client_roles": {"auth-service": ["user"]},
+            "raw_claims": mock_token_claims
+        })
+        
+        response = await authenticated_client.get("/api/v1/auth/me")
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["sub"] == mock_token_claims["sub"]
+        assert data["email"] == mock_token_claims["email"]
+        assert data["preferred_username"] == mock_token_claims["preferred_username"]
+        assert "realm_roles" in data
+        assert "client_roles" in data
+    
+    async def test_get_me_unauthorized(self, client):
+        """Тест запроса без токена"""
+        response = await client.get("/api/v1/auth/me")
+        
+        assert response.status_code == 401
+        assert "Missing bearer token" in response.json()["detail"]
+    
+    async def test_get_me_invalid_token(self, client):
+        """Тест с невалидным токеном"""
+        client.headers["Authorization"] = "Bearer invalid-token"
+        app.state.token_verifier.verify = AsyncMock(side_effect=ValueError("Invalid token"))
+        
+        response = await client.get("/api/v1/auth/me")
+        
+        assert response.status_code == 401
+        assert "Invalid token" in response.json()["detail"]
+
+    async def test_get_me_expired_token(self, client):
+        """Тест с истёкшим токеном"""
+        client.headers["Authorization"] = "Bearer expired-token"
+        app.state.token_verifier.verify = AsyncMock(side_effect=ValueError("Token expired"))
+        
+        response = await client.get("/api/v1/auth/me")
+        
+        assert response.status_code == 401
+        assert "Token expired" in response.json()["detail"]
+
+    async def test_get_me_service_error(self, authenticated_client):
+        """Тест ошибки сервиса"""
+        app.state.auth_service.me_payload = MagicMock(side_effect=ValueError("Invalid claims"))
+        
+        response = await authenticated_client.get("/api/v1/auth/me")
+        
+        assert response.status_code == 401
+        assert "Invalid authentication data" in response.json()["detail"]
+    
+    async def test_get_me_unexpected_error(self, authenticated_client):
+        """Тест неожиданной ошибки"""
+        app.state.auth_service.me_payload = MagicMock(side_effect=Exception("Unexpected error"))
+        
+        response = await authenticated_client.get("/api/v1/auth/me")
+        
+        assert response.status_code == 500
+        assert "Failed to get user information" in response.json()["detail"]
+    
+    async def test_get_me_minimal_response(self, authenticated_client):
+        """Тест минимального ответа (только sub)"""
+        app.state.auth_service.me_payload = MagicMock(return_value={
+            "sub": "test-user-id",
+            "email": None,
+            "preferred_username": None,
+            "name": None,
+            "given_name": None,
+            "family_name": None,
+            "phone": None,
+            "about": None,
+            "realm_roles": [],
+            "client_roles": {},
+            "raw_claims": {"sub": "test-user-id"}
+        })
+        
+        response = await authenticated_client.get("/api/v1/auth/me")
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["sub"] == "test-user-id"
+        assert data["email"] is None
+        assert data["realm_roles"] == []

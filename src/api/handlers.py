@@ -11,6 +11,7 @@ from src.api.dto import (
     ResetPasswordRequestDTO,
     ForgotPasswordRequestDTO,
     VerifyEmailRequestDTO,
+    MeResponseDTO
 )
 from src.errors import (
     InvalidTokenError,
@@ -239,4 +240,31 @@ async def forgot_password(payload: ForgotPasswordRequestDTO, request: Request):
     await business.forgot_password(payload.email)
     return {"message": "If the email exists, a password reset link has been sent"}
 
-
+@router.get("/auth/me", response_model=MeResponseDTO)
+async def get_me(
+    request: Request, 
+    claims: dict = Depends(get_current_claims)
+):
+    try:
+        business = await get_auth_service(request)
+        payload = business.me_payload(claims)
+        return MeResponseDTO(**payload)
+        
+    except ValueError as e:
+        logger.error(f"Invalid claims in /auth/me: {e}")
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authentication data"
+        )
+    except TypeError as e:
+        logger.error(f"Type error in /auth/me: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error"
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error in /auth/me: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to get user information"
+        )
