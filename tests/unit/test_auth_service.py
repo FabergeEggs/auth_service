@@ -249,3 +249,26 @@ class TestMePayload:
         """Тест с неправильным типом claims"""
         with pytest.raises(TypeError, match="must be dict"):
             auth_service.me_payload(["not", "a", "dict"])
+
+class TestAuthServicePasswordChange:
+    """Тесты для смены пароля"""
+    
+    @pytest.mark.asyncio
+    async def test_request_password_change_sends_email(self, mock_auth_provider):
+        """Тест отправки письма для смены пароля"""
+        mock_auth_provider.get_user_by_email.return_value = {"id": "user-123"}
+        
+        auth_service = AuthService(mock_auth_provider)
+        await auth_service.forgot_password("test@example.com")
+        
+        mock_auth_provider.send_reset_password_email.assert_awaited_once_with("user-123")
+    
+    @pytest.mark.asyncio
+    async def test_request_password_change_unknown_email(self, mock_auth_provider):
+        """Тест с несуществующим email (не должен падать)"""
+        mock_auth_provider.get_user_by_email.return_value = None
+        
+        auth_service = AuthService(mock_auth_provider)
+        await auth_service.forgot_password("unknown@example.com")
+        
+        mock_auth_provider.send_reset_password_email.assert_not_awaited()

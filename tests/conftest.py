@@ -184,3 +184,11 @@ def mock_token_claims() -> Dict[str, Any]:
         "iss": "http://keycloak:8080/realms/myrealm",
         "aud": "auth-service"
     }
+
+@pytest.fixture
+def authenticated_client_with_email(client, mock_token_claims):
+    """Аутентифицированный клиент с email в токене"""
+    client.headers["Authorization"] = "Bearer test-token"
+    app.state.token_verifier.verify = AsyncMock(return_value=mock_token_claims)
+    yield client
+    client.headers.pop("Authorization", None)
