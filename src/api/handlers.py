@@ -575,6 +575,33 @@ async def forgot_password(payload: ForgotPasswordRequestDTO, request: Request):
     await business.forgot_password(payload.email)
     return {"message": "If the email exists, a password reset link has been sent"}
 
+@router.post(
+    "/auth/password-change",
+    responses={
+        200: {"description": "Change link sent", "content": {"application/json": {"example": {"message": "Password change link has been sent to your email"}}}},
+        401: {"description": "Not authenticated"},
+        503: {"description": "Service unavailable"}
+    }
+)
+@limiter.limit("3/minute")
+async def request_password_change(
+    request: Request,
+    claims: dict = Depends(get_current_claims)
+):
+    """
+    Запрос на смену пароля для ЗАЛОГИНЕННОГО пользователя.
+    Отправляет письмо с Action Token.
+    """
+    email = claims.get("email")
+    
+    if not email:
+        raise HTTPException(401, "Email not found in token")
+    payload = ForgotPasswordRequestDTO(email=str(email))
+    
+    business = await get_auth_service(request)
+    await business.forgot_password(payload.email)
+    
+    return {"message": "Password change link has been sent to your email"}
 
 @router.get(
     "/auth/me", 
