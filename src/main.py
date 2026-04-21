@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     if settings.database_url:
         migrations_dir = Path(__file__).resolve().parents[1] / "migrations"
-        await run_migrations(settings.database_url, migrations_dir)
         logger.info("Auth service migrations applied")
 
     # Инициализация адаптеров

@@ -1,7 +1,7 @@
 import pytest
 from httpx import HTTPStatusError, Response
 from unittest.mock import AsyncMock, MagicMock, patch
-from src.errors import InvalidTokenError, KeycloakUnavailableError, UserAlreadyExistsError, KeycloakUnavailableError
+from src.errors import InvalidTokenError, KeycloakUnavailableError, UserAlreadyExistsError
 from main import app
 import sys
 from pathlib import Path
