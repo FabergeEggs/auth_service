@@ -1,7 +1,7 @@
 import logging
 import time
 import asyncio
-from typing import Optional, Dict, Any, cast
+from typing import Optional, Dict, Any, cast, Union
 import httpx
 from jose import jwt, JWTError, ExpiredSignatureError
 from src.errors import (
@@ -101,7 +101,9 @@ class KeycloakAdapter:
             return cast(str, self._admin_token)
 
     async def _retry_request(self, method: str, url: str, **kwargs) -> httpx.Response:
-        last_exc = None
+        last_exc: Union[
+            httpx.TimeoutException, httpx.ConnectError, httpx.HTTPStatusError, None
+        ] = None
         for attempt in range(self.MAX_RETRIES):
             try:
                 resp = await self._client.request(method, url, **kwargs)
