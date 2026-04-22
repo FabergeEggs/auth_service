@@ -20,3 +20,13 @@ markers = [
 filterwarnings = [
     "ignore::DeprecationWarning:slowapi.extension",
 ]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-mock",
+    "pytest-cov",
+    "httpx",
+    "faker",
+]
