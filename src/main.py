@@ -1,6 +1,5 @@
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -20,7 +19,6 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if settings.database_url:
-        migrations_dir = Path(__file__).resolve().parents[1] / "migrations"
         logger.info("Auth service migrations applied")
 
     # Инициализация адаптеров
@@ -35,15 +33,13 @@ async def lifespan(app: FastAPI):
         admin_client_id=settings.admin_client_id,
         admin_token_url=settings.admin_token_url,
         realm=settings.realm,
-        frontend_url=settings.frontend_url
+        frontend_url=settings.frontend_url,
     )
 
     token_verifier = TokenVerifier(
-        jwks_url=settings.jwks_url,
-        issuer=settings.issuer,
-        audience=settings.audience
+        jwks_url=settings.jwks_url, issuer=settings.issuer, audience=settings.audience
     )
-    
+
     event_producer = None
     if settings.kafka_enabled:
         event_producer = KafkaEventProducer(settings.redpanda_bootstrap_servers)
@@ -53,7 +49,7 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"Failed to start Kafka producer: {e}")
             event_producer = None
-    
+
     auth_service = AuthService(adapter, event_producer)  # ← передать producer
 
     # Сохраняем в app.state
@@ -69,7 +65,7 @@ async def lifespan(app: FastAPI):
             await app.state.event_producer.stop()
         except Exception as e:
             logger.error("Error closing event producer: %s", e)
-    
+
     try:
         await adapter.close()
     except Exception as e:
@@ -112,6 +108,5 @@ async def health_check(request: Request):
     if ok:
         return {"status": "healthy", "dependencies": {"keycloak": "ok"}}
     return JSONResponse(
-        {"status": "unhealthy", "dependencies": {"keycloak": "down"}},
-        status_code=503
+        {"status": "unhealthy", "dependencies": {"keycloak": "down"}}, status_code=503
     )

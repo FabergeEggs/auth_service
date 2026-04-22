@@ -39,7 +39,7 @@
 
 
 # async def get_current_claims(
-#     request: Request,   
+#     request: Request,
 #     authorization: str = Header(default="")
 # ) -> dict:
 #     if not authorization.startswith("Bearer "):
@@ -87,28 +87,28 @@
 # async def login(request: Request, payload: LoginRequestDTO):
 #     business = await get_auth_service(request)
 #     settings = await get_settings(request)
-    
+
 #     try:
 #         data = await business.login(login=payload.login, password=payload.password)
 #         logger.info("Login success", extra={"event": "login_success", "user_id": data.get("user_id")})
-        
+
 #         resp = JSONResponse({
 #             "access_token": data["access_token"],
 #             "expires_in": data["expires_in"],
 #             "refresh_expires_in": data.get("refresh_expires_in"),
 #             "token_type": data.get("token_type", "bearer"),
 #             "scope": data.get("scope"),
-#             "user_id": data.get("user_id") 
+#             "user_id": data.get("user_id")
 #         })
-        
+
 #         max_age = data.get("refresh_expires_in", settings.refresh_token_max_age)
 #         resp.set_cookie(
-#             "refresh_token", 
+#             "refresh_token",
 #             data["refresh_token"],
-#             httponly=True, 
-#             secure=settings.secure_cookies, 
+#             httponly=True,
+#             secure=settings.secure_cookies,
 #             samesite="lax",
-#             max_age=max_age, 
+#             max_age=max_age,
 #             path="/",
 #             domain=settings.cookie_domain
 #         )
@@ -242,14 +242,14 @@
 
 # @router.get("/auth/me", response_model=MeResponseDTO)
 # async def get_me(
-#     request: Request, 
+#     request: Request,
 #     claims: dict = Depends(get_current_claims)
 # ):
 #     try:
 #         business = await get_auth_service(request)
 #         payload = business.me_payload(claims)
 #         return MeResponseDTO(**payload)
-        
+
 #     except ValueError as e:
 #         logger.error(f"Invalid claims in /auth/me: {e}")
 #         raise HTTPException(
@@ -284,7 +284,7 @@ from src.api.dto import (
     ForgotPasswordRequestDTO,
     VerifyEmailRequestDTO,
     MeResponseDTO,
-    TokenResponseDTO
+    TokenResponseDTO,
 )
 from src.errors import (
     InvalidTokenError,
@@ -300,18 +300,21 @@ limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(prefix="/api/v1")
 
+
 async def get_settings(request: Request):
     return request.app.state.settings
+
 
 async def get_auth_service(request: Request) -> AuthService:
     return request.app.state.auth_service
 
+
 async def get_token_verifier(request: Request):
     return request.app.state.token_verifier
 
+
 async def get_current_claims(
-    request: Request,   
-    authorization: str = Header(default="")
+    request: Request, authorization: str = Header(default="")
 ) -> dict:
     if not authorization.startswith("Bearer "):
         raise HTTPException(401, "Missing bearer token")
@@ -324,24 +327,27 @@ async def get_current_claims(
 
 
 @router.post(
-    "/auth/register", 
+    "/auth/register",
     response_model=RegisterResponseDTO,
     status_code=200,
     responses={
         200: {"description": "Successful registration", "model": RegisterResponseDTO},
         400: {"description": "Invalid data"},
         409: {"description": "User already exists"},
-        503: {"description": "Service unavailable"}
-    }
+        503: {"description": "Service unavailable"},
+    },
 )
 @limiter.limit("3/minute")
 async def register(payload: RegisterRequestDTO, request: Request):
     business = await get_auth_service(request)
     try:
         uid = await business.register(
-            email=payload.email, password=payload.password,
-            first_name=payload.first_name, last_name=payload.last_name,
-            phone=payload.phone, about=payload.about
+            email=payload.email,
+            password=payload.password,
+            first_name=payload.first_name,
+            last_name=payload.last_name,
+            phone=payload.phone,
+            about=payload.about,
         )
         return RegisterResponseDTO(user_id=uid)
     except UserAlreadyExistsError:
@@ -350,10 +356,15 @@ async def register(payload: RegisterRequestDTO, request: Request):
         if e.response.status_code == 400:
             try:
                 error_data = e.response.json()
-                error_msg = error_data.get("error_description", "Invalid password policy")
+                error_msg = error_data.get(
+                    "error_description", "Invalid password policy"
+                )
                 raise HTTPException(400, f"Registration failed: {error_msg}")
             except Exception:
-                logger.warning("Keycloak returned 400 but response is not JSON: %s", e.response.text)
+                logger.warning(
+                    "Keycloak returned 400 but response is not JSON: %s",
+                    e.response.text,
+                )
                 raise HTTPException(400, "Registration failed: invalid data")
         raise HTTPException(e.response.status_code, "Registration failed")
     except KeycloakUnavailableError:
@@ -369,39 +380,42 @@ async def register(payload: RegisterRequestDTO, request: Request):
     responses={
         200: {"description": "Successful login", "model": TokenResponseDTO},
         401: {"description": "Invalid credentials"},
-        503: {"description": "Service unavailable"}
-    }
+        503: {"description": "Service unavailable"},
+    },
 )
 @limiter.limit("5/minute")
 async def login(request: Request, payload: LoginRequestDTO):
     business = await get_auth_service(request)
     settings = await get_settings(request)
-    
+
     try:
         data = await business.login(login=payload.login, password=payload.password)
-        logger.info("Login success", extra={"event": "login_success", "user_id": data.get("user_id")})
-        
+        logger.info(
+            "Login success",
+            extra={"event": "login_success", "user_id": data.get("user_id")},
+        )
+
         response_data = {
             "access_token": data["access_token"],
             "expires_in": data["expires_in"],
             "refresh_expires_in": data.get("refresh_expires_in"),
             "token_type": data.get("token_type", "bearer"),
             "scope": data.get("scope"),
-            "user_id": data.get("user_id")
+            "user_id": data.get("user_id"),
         }
-        
+
         resp = JSONResponse(response_data)
-        
+
         max_age = data.get("refresh_expires_in", settings.refresh_token_max_age)
         resp.set_cookie(
-            "refresh_token", 
+            "refresh_token",
             data["refresh_token"],
-            httponly=True, 
-            secure=settings.secure_cookies, 
+            httponly=True,
+            secure=settings.secure_cookies,
             samesite="lax",
-            max_age=max_age, 
+            max_age=max_age,
             path="/",
-            domain=settings.cookie_domain
+            domain=settings.cookie_domain,
         )
         return resp
     except KeycloakUnavailableError:
@@ -417,8 +431,8 @@ async def login(request: Request, payload: LoginRequestDTO):
     responses={
         200: {"description": "Token refreshed", "model": TokenResponseDTO},
         401: {"description": "Invalid refresh token"},
-        503: {"description": "Service unavailable"}
-    }
+        503: {"description": "Service unavailable"},
+    },
 )
 @limiter.limit("10/minute")
 async def refresh(request: Request):
@@ -433,24 +447,31 @@ async def refresh(request: Request):
             "expires_in": data["expires_in"],
             "refresh_expires_in": data.get("refresh_expires_in"),
             "token_type": data.get("token_type", "bearer"),
-            "scope": data.get("scope")
+            "scope": data.get("scope"),
         }
         resp = JSONResponse(response_data)
         if "refresh_token" in data:
             max_age = data.get("refresh_expires_in", settings.refresh_token_max_age)
-            is_production = (settings.environment == "production")
+            is_production = settings.environment == "production"
             resp.set_cookie(
-                "refresh_token", data["refresh_token"],
-                httponly=True, secure=is_production, samesite="lax",
-                max_age=max_age, path="/"
+                "refresh_token",
+                data["refresh_token"],
+                httponly=True,
+                secure=is_production,
+                samesite="lax",
+                max_age=max_age,
+                path="/",
             )
         return resp
     except HTTPStatusError:
         resp = JSONResponse({"detail": "Invalid refresh token"}, status_code=401)
-        is_production = (settings.environment == "production")
+        is_production = settings.environment == "production"
         resp.delete_cookie(
-            "refresh_token", path="/",
-            httponly=True, secure=is_production, samesite="lax"
+            "refresh_token",
+            path="/",
+            httponly=True,
+            secure=is_production,
+            samesite="lax",
         )
         return resp
     except KeycloakUnavailableError:
@@ -460,9 +481,12 @@ async def refresh(request: Request):
 @router.post(
     "/auth/logout",
     responses={
-        200: {"description": "Successfully logged out", "content": {"application/json": {"example": {"status": "ok"}}}},
-        503: {"description": "Service unavailable"}
-    }
+        200: {
+            "description": "Successfully logged out",
+            "content": {"application/json": {"example": {"status": "ok"}}},
+        },
+        503: {"description": "Service unavailable"},
+    },
 )
 @limiter.limit("5/minute")
 async def logout(request: Request):
@@ -477,10 +501,13 @@ async def logout(request: Request):
         except KeycloakUnavailableError:
             raise HTTPException(503, "Authentication service temporarily unavailable")
         finally:
-            is_production = (settings.environment == "production")
+            is_production = settings.environment == "production"
             resp.delete_cookie(
-                "refresh_token", path="/",
-                httponly=True, secure=is_production, samesite="lax"
+                "refresh_token",
+                path="/",
+                httponly=True,
+                secure=is_production,
+                samesite="lax",
             )
     return resp
 
@@ -488,10 +515,17 @@ async def logout(request: Request):
 @router.post(
     "/auth/logout-all",
     responses={
-        200: {"description": "All sessions terminated", "content": {"application/json": {"example": {"status": "ok", "message": "All sessions terminated"}}}},
+        200: {
+            "description": "All sessions terminated",
+            "content": {
+                "application/json": {
+                    "example": {"status": "ok", "message": "All sessions terminated"}
+                }
+            },
+        },
         400: {"description": "No user id"},
-        503: {"description": "Service unavailable"}
-    }
+        503: {"description": "Service unavailable"},
+    },
 )
 @limiter.limit("5/minute")
 async def logout_all(request: Request, claims: dict = Depends(get_current_claims)):
@@ -505,10 +539,19 @@ async def logout_all(request: Request, claims: dict = Depends(get_current_claims
 @router.post(
     "/auth/verify-email",
     responses={
-        200: {"description": "Email verified", "content": {"application/json": {"example": {"message": "Email verified successfully. You can now login."}}}},
+        200: {
+            "description": "Email verified",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "message": "Email verified successfully. You can now login."
+                    }
+                }
+            },
+        },
         400: {"description": "Invalid token"},
-        503: {"description": "Service unavailable"}
-    }
+        503: {"description": "Service unavailable"},
+    },
 )
 @limiter.limit("5/minute")
 async def verify_email(payload: VerifyEmailRequestDTO, request: Request):
@@ -531,10 +574,19 @@ async def verify_email(payload: VerifyEmailRequestDTO, request: Request):
 @router.post(
     "/auth/reset-password",
     responses={
-        200: {"description": "Password reset", "content": {"application/json": {"example": {"message": "Password has been reset successfully. You can now login with your new password."}}}},
+        200: {
+            "description": "Password reset",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "message": "Password has been reset successfully. You can now login with your new password."
+                    }
+                }
+            },
+        },
         400: {"description": "Invalid token or password"},
-        503: {"description": "Service unavailable"}
-    }
+        503: {"description": "Service unavailable"},
+    },
 )
 @limiter.limit("5/minute")
 async def reset_password(payload: ResetPasswordRequestDTO, request: Request):
@@ -544,7 +596,9 @@ async def reset_password(payload: ResetPasswordRequestDTO, request: Request):
     business = await get_auth_service(request)
     try:
         await business.reset_password(payload.key, payload.new_password)
-        return {"message": "Password has been reset successfully. You can now login with your new password."}
+        return {
+            "message": "Password has been reset successfully. You can now login with your new password."
+        }
     except InvalidTokenError as e:
         logger.warning(f"Invalid reset token: {e}")
         raise HTTPException(400, str(e))
@@ -562,9 +616,18 @@ async def reset_password(payload: ResetPasswordRequestDTO, request: Request):
 @router.post(
     "/auth/forgot-password",
     responses={
-        200: {"description": "Reset email sent", "content": {"application/json": {"example": {"message": "If the email exists, a password reset link has been sent"}}}},
-        503: {"description": "Service unavailable"}
-    }
+        200: {
+            "description": "Reset email sent",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "message": "If the email exists, a password reset link has been sent"
+                    }
+                }
+            },
+        },
+        503: {"description": "Service unavailable"},
+    },
 )
 @limiter.limit("3/minute")
 async def forgot_password(payload: ForgotPasswordRequestDTO, request: Request):
@@ -575,44 +638,48 @@ async def forgot_password(payload: ForgotPasswordRequestDTO, request: Request):
     await business.forgot_password(payload.email)
     return {"message": "If the email exists, a password reset link has been sent"}
 
+
 @router.post(
     "/auth/password-change",
     responses={
-        200: {"description": "Change link sent", "content": {"application/json": {"example": {"message": "Password change link has been sent to your email"}}}},
+        200: {
+            "description": "Change link sent",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "message": "Password change link has been sent to your email"
+                    }
+                }
+            },
+        },
         401: {"description": "Not authenticated"},
-        503: {"description": "Service unavailable"}
-    }
+        503: {"description": "Service unavailable"},
+    },
 )
 @limiter.limit("3/minute")
-async def password_change(
-    request: Request,
-    claims: dict = Depends(get_current_claims)
-):
+async def password_change(request: Request, claims: dict = Depends(get_current_claims)):
     try:
         email = claims.get("email")
         if not email:
             raise HTTPException(400, "Email not found in token")
-        
+
         business = await get_auth_service(request)
         await business.forgot_password(email)
         return {"message": "Password change link has been sent to your email"}
     except KeycloakUnavailableError:
         raise HTTPException(503, "Service temporarily unavailable")
 
-        
+
 @router.get(
-    "/auth/me", 
+    "/auth/me",
     response_model=MeResponseDTO,
     responses={
         200: {"description": "User information", "model": MeResponseDTO},
         401: {"description": "Invalid or missing token"},
-        500: {"description": "Internal server error"}
-    }
+        500: {"description": "Internal server error"},
+    },
 )
-async def get_me(
-    request: Request, 
-    claims: dict = Depends(get_current_claims)
-):
+async def get_me(request: Request, claims: dict = Depends(get_current_claims)):
     """Возвращает информацию о текущем пользователе"""
     try:
         business = await get_auth_service(request)

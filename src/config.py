@@ -2,11 +2,12 @@ from typing import List, Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env", 
+        env_file=".env",
         env_file_encoding="utf-8",
-        extra="ignore"  # ← важно! игнорировать лишние переменные
+        extra="ignore",  # ← важно! игнорировать лишние переменные
     )
 
     environment: str = "development"
@@ -22,10 +23,11 @@ class Settings(BaseSettings):
     admin_password: str = Field("admin", alias="KEYCLOAK_ADMIN_PASSWORD")
     admin_client_id: str = Field("admin-cli", alias="KEYCLOAK_ADMIN_CLIENT_ID")
 
-
-    redpanda_bootstrap_servers: str = Field("redpanda:9092", alias="REDPANDA_BOOTSTRAP_SERVERS")
+    redpanda_bootstrap_servers: str = Field(
+        "redpanda:9092", alias="REDPANDA_BOOTSTRAP_SERVERS"
+    )
     kafka_enabled: bool = Field(True, alias="KAFKA_ENABLED")
-    
+
     frontend_url: str = "http://localhost:3000"
 
     refresh_token_max_age: int = 2592000
@@ -58,5 +60,6 @@ class Settings(BaseSettings):
     @property
     def audience(self) -> str:
         return self.client_id
+
 
 settings = Settings()

@@ -24,7 +24,7 @@ services:
       KC_HOSTNAME_STRICT: "false"
       KC_STRICT_TRANSPORT_SECURITY: "disabled"
     volumes:
-      - ./keycloak-export:/opt/keycloak/data/import:ro 
+      - ./keycloak-export:/opt/keycloak/data/import:ro
       - keycloak_data:/opt/keycloak/data
     command: start-dev --import-realm --hostname-strict=false --http-enabled=true
     depends_on:
@@ -74,7 +74,7 @@ services:
       - "6379:6379"
     networks:
       - auth-network
-    
+
   redpanda:
     image: docker.redpanda.com/redpandadata/redpanda:latest
     container_name: redpanda
@@ -105,7 +105,7 @@ services:
 networks:
   auth-network:
     driver: bridge
-  
+
 volumes:
   mailhog_data:
   keycloak_data:

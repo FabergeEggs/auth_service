@@ -1,15 +1,19 @@
 from typing import Optional, Dict, List, Any
 from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field
 
+
 class ForgotPasswordRequestDTO(BaseModel):
     email: EmailStr
+
 
 class ResetPasswordRequestDTO(BaseModel):
     key: str = Field(..., min_length=1)
     new_password: str = Field(..., min_length=6)
 
+
 class VerifyEmailRequestDTO(BaseModel):
     key: str = Field(..., min_length=1)
+
 
 class RegisterRequestDTO(BaseModel):
     email: EmailStr
@@ -19,13 +23,18 @@ class RegisterRequestDTO(BaseModel):
     about: Optional[str] = Field(None, max_length=500)
     phone: Optional[str] = Field(None, max_length=20)
 
+
 class RegisterResponseDTO(BaseModel):
     user_id: str
     message: str = "User registered successfully"
 
+
 class LoginRequestDTO(BaseModel):
-    login: str = Field(..., min_length=3, validation_alias=AliasChoices("login", "email"))
+    login: str = Field(
+        ..., min_length=3, validation_alias=AliasChoices("login", "email")
+    )
     password: str = Field(..., min_length=1)
+
 
 class TokenResponseDTO(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -35,6 +44,7 @@ class TokenResponseDTO(BaseModel):
     token_type: str = "bearer"
     scope: str | None = None
     user_id: str | None = None
+
 
 class MeResponseDTO(BaseModel):
     sub: str

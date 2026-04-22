@@ -1,4 +1,5 @@
 """Изолированные интеграционные тесты адаптера Keycloak."""
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
