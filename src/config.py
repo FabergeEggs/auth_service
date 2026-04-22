@@ -68,4 +68,4 @@ class Settings(BaseSettings):
         return None
 
 
-settings = Settings()
+settings = Settings()  # type: ignore[call-arg]
