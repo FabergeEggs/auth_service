@@ -115,15 +115,21 @@ class TestRegisterResponseDTO:
         """Тест валидного ответа"""
         dto = RegisterResponseDTO(
             user_id="123e4567-e89b-12d3-a456-426614174000",
-            message="User registered successfully",
+            message="User registered successfully, to verify account follow link in email",
         )
         assert dto.user_id == "123e4567-e89b-12d3-a456-426614174000"
-        assert dto.message == "User registered successfully"
+        assert (
+            dto.message
+            == "User registered successfully, to verify account follow link in email"
+        )
 
     def test_default_message(self):
         """Тест сообщения по умолчанию"""
         dto = RegisterResponseDTO(user_id="123e4567-e89b-12d3-a456-426614174000")
-        assert dto.message == "User registered successfully"
+        assert (
+            dto.message
+            == "User registered successfully, to verify account follow link in email"
+        )
 
     def test_custom_message(self):
         """Тест кастомного сообщения"""

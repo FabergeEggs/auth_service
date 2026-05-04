@@ -93,26 +93,45 @@ async def register(payload: RegisterRequestDTO, request: Request):
         return RegisterResponseDTO(user_id=uid)
     except UserAlreadyExistsError:
         raise HTTPException(409, "User already exists")
+    # except HTTPStatusError as e:
+    #     if e.response.status_code == 400:
+    #         try:
+    #             error_data = e.response.json()
+    #             error_msg = error_data.get("error_description", "")
+    #             # Проверяем, что ошибка связана с паролем
+    #             if "password" in error_msg.lower():
+    #                 raise HTTPException(400, "Invalid password policy")
+    #             raise HTTPException(400, f"Registration failed: {error_msg}")
+    #         except Exception:
+    #             logger.warning(
+    #                 "Keycloak returned 400 but response is not JSON: %s",
+    #                 e.response.text,
+    #             )
+    #             raise HTTPException(400, "Registration failed: invalid data")
+    #     raise HTTPException(e.response.status_code, "Registration failed")
+    # except KeycloakUnavailableError:
+    #     raise HTTPException(503, "Authentication service temporarily unavailable")
+    # except Exception:
+    #     logger.exception("Unexpected register error")
+    #     raise HTTPException(500, "Internal error")
     except HTTPStatusError as e:
         if e.response.status_code == 400:
             try:
                 error_data = e.response.json()
-                error_msg = error_data.get(
-                    "error_description", "Invalid password policy"
-                )
+                error_msg = error_data.get("error_description", "")
+                logger.warning(f"Keycloak error response: {error_msg}")
+
+                if "password" in error_msg.lower():
+                    raise HTTPException(400, "Invalid password policy")
                 raise HTTPException(400, f"Registration failed: {error_msg}")
-            except Exception:
+            except (ValueError, AttributeError, TypeError) as parse_err:
                 logger.warning(
-                    "Keycloak returned 400 but response is not JSON: %s",
-                    e.response.text,
+                    f"Keycloak returned 400 but response is not JSON: {e.response.text}, error: {parse_err}"
                 )
+                if e.response.text and "password" in e.response.text.lower():
+                    raise HTTPException(400, "Invalid password policy")
                 raise HTTPException(400, "Registration failed: invalid data")
         raise HTTPException(e.response.status_code, "Registration failed")
-    except KeycloakUnavailableError:
-        raise HTTPException(503, "Authentication service temporarily unavailable")
-    except Exception:
-        logger.exception("Unexpected register error")
-        raise HTTPException(500, "Internal error")
 
 
 @router.post(
@@ -396,8 +415,15 @@ async def forgot_password(payload: ForgotPasswordRequestDTO, request: Request):
     Инициирует сброс пароля: отправляет пользователю письмо со ссылкой на фронтенд.
     """
     business = await get_auth_service(request)
-    await business.forgot_password(payload.email)
-    return {"message": "If the email exists, a password reset link has been sent"}
+    try:
+        await business.forgot_password(payload.email)
+        return {"message": "If the email exists, a password reset link has been sent"}
+    except KeycloakUnavailableError:
+        logger.error("Keycloak unavailable during forgot password")
+        raise HTTPException(503, "Authentication service temporarily unavailable")
+    except Exception as e:
+        logger.error(f"Forgot password failed: {e}", exc_info=True)
+        raise HTTPException(500, "Internal error")
 
 
 @router.post(
