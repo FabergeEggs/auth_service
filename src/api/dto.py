@@ -26,7 +26,9 @@ class RegisterRequestDTO(BaseModel):
 
 class RegisterResponseDTO(BaseModel):
     user_id: str
-    message: str = "User registered successfully"
+    message: str = (
+        "User registered successfully, to verify account follow link in email"
+    )
 
 
 class LoginRequestDTO(BaseModel):
