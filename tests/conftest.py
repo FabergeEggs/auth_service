@@ -1,48 +1,34 @@
+# tests/conftest.py
 import asyncio
-from datetime import UTC, datetime, timedelta
 import pytest
-import pytest_asyncio
 from typing import Dict, Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock, AsyncMock
 from httpx import AsyncClient, ASGITransport
 
-import sys
-from pathlib import Path
+from main import app
+from src.service.auth_service import AuthService
+from src.config import settings
+from tests.mocks import MockAuthProvider
 
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
 
-from main import app  # noqa: E402
-from src.service.auth_service import AuthService  # noqa: E402
-from tests.mocks import MockAuthProvider  # noqa: E402
+# Автоматическая маркировка тестов
+def pytest_configure(config):
+    config.addinivalue_line("markers", "unit: Unit tests")
+    config.addinivalue_line("markers", "integration: Integration tests")
+    config.addinivalue_line("markers", "slow: Slow tests")
 
-try:
-    from faker import Faker
 
-    fake = Faker()
-except ImportError:
-
-    class FakeFallback:
-        def email(self):
-            return "test@example.com"
-
-        def first_name(self):
-            return "Test"
-
-        def last_name(self):
-            return "User"
-
-        def phone_number(self):
-            return "+1234567890"
-
-        def text(self, max_nb_chars=100):
-            return "Test text"
-
-    fake = FakeFallback()
+def pytest_runtest_setup(item):
+    """Автоматически применяем маркеры на основе пути"""
+    if "integration" in str(item.fspath):
+        item.add_marker(pytest.mark.integration)
+    elif "unit" in str(item.fspath):
+        item.add_marker(pytest.mark.unit)
 
 
 @pytest.fixture(scope="session")
 def event_loop():
+    """Создаёт event loop для всей сессии тестов"""
     loop = asyncio.get_event_loop_policy().new_event_loop()
     yield loop
     loop.close()
@@ -63,6 +49,9 @@ def auth_service(mock_auth_provider):
 @pytest.fixture
 def sample_claims():
     """Пример claims для тестов"""
+    from datetime import datetime, UTC, timedelta
+
+    now = datetime.now(UTC)
     return {
         "sub": "123e4567-e89b-12d3-a456-426614174000",
         "email": "test@example.com",
@@ -72,11 +61,14 @@ def sample_claims():
         "family_name": "User",
         "realm_access": {"roles": ["user"]},
         "resource_access": {"account": {"roles": ["view-profile"]}},
+        "exp": int((now + timedelta(hours=1)).timestamp()),
+        "iat": int(now.timestamp()),
     }
 
 
-@pytest_asyncio.fixture
+@pytest.fixture
 async def client():
+    """Тестовый клиент FastAPI"""
     app.state.settings = MagicMock(
         refresh_token_max_age=2592000,
         secure_cookies=False,
@@ -91,8 +83,9 @@ async def client():
         yield ac
 
 
-@pytest_asyncio.fixture
+@pytest.fixture
 async def authenticated_client(client, mock_token_claims):
+    """Аутентифицированный клиент"""
     client.headers["Authorization"] = "Bearer test-token"
     app.state.token_verifier.verify = AsyncMock(return_value=mock_token_claims)
     yield client
@@ -101,6 +94,7 @@ async def authenticated_client(client, mock_token_claims):
 
 @pytest.fixture
 def mock_event_producer():
+    """Мок для Kafka producer"""
     mock = AsyncMock()
     mock.start = AsyncMock()
     mock.stop = AsyncMock()
@@ -110,23 +104,41 @@ def mock_event_producer():
 
 @pytest.fixture
 def test_user_data() -> Dict[str, Any]:
-    return {
-        "email": fake.email(),
-        "password": "Test123!@#",
-        "first_name": fake.first_name(),
-        "last_name": fake.last_name(),
-        "phone": fake.phone_number()[:20],
-        "about": fake.text(max_nb_chars=100),
-    }
+    """Тестовые данные пользователя"""
+    try:
+        from faker import Faker
+
+        fake = Faker()
+        return {
+            "email": fake.email(),
+            "password": "Test123!@#",
+            "first_name": fake.first_name(),
+            "last_name": fake.last_name(),
+            "phone": fake.phone_number()[:20],
+            "about": fake.text(max_nb_chars=100),
+        }
+    except ImportError:
+        return {
+            "email": "test@example.com",
+            "password": "Test123!@#",
+            "first_name": "Test",
+            "last_name": "User",
+            "phone": "+1234567890",
+            "about": "Test about me",
+        }
 
 
 @pytest.fixture
 def test_login_data(test_user_data) -> Dict[str, str]:
+    """Тестовые данные для логина"""
     return {"login": test_user_data["email"], "password": test_user_data["password"]}
 
 
 @pytest.fixture
 def mock_token_claims() -> Dict[str, Any]:
+    """Mock JWT claims"""
+    from datetime import datetime, UTC, timedelta
+
     now = datetime.now(UTC)
     return {
         "sub": "test-user-id-123",
@@ -141,6 +153,6 @@ def mock_token_claims() -> Dict[str, Any]:
         "attributes": {"phone": ["+1234567890"], "about": ["Test about me"]},
         "exp": int((now + timedelta(hours=1)).timestamp()),
         "iat": int(now.timestamp()),
-        "iss": "http://keycloak:8080/realms/myrealm",
-        "aud": "auth-service",
+        "iss": f"{settings.keycloak_url}/realms/{settings.realm}",
+        "aud": settings.client_id,
     }

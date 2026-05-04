@@ -93,27 +93,6 @@ async def register(payload: RegisterRequestDTO, request: Request):
         return RegisterResponseDTO(user_id=uid)
     except UserAlreadyExistsError:
         raise HTTPException(409, "User already exists")
-    # except HTTPStatusError as e:
-    #     if e.response.status_code == 400:
-    #         try:
-    #             error_data = e.response.json()
-    #             error_msg = error_data.get("error_description", "")
-    #             # Проверяем, что ошибка связана с паролем
-    #             if "password" in error_msg.lower():
-    #                 raise HTTPException(400, "Invalid password policy")
-    #             raise HTTPException(400, f"Registration failed: {error_msg}")
-    #         except Exception:
-    #             logger.warning(
-    #                 "Keycloak returned 400 but response is not JSON: %s",
-    #                 e.response.text,
-    #             )
-    #             raise HTTPException(400, "Registration failed: invalid data")
-    #     raise HTTPException(e.response.status_code, "Registration failed")
-    # except KeycloakUnavailableError:
-    #     raise HTTPException(503, "Authentication service temporarily unavailable")
-    # except Exception:
-    #     logger.exception("Unexpected register error")
-    #     raise HTTPException(500, "Internal error")
     except HTTPStatusError as e:
         if e.response.status_code == 400:
             try:

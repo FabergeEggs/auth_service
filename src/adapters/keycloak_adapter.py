@@ -27,42 +27,93 @@ class KeycloakAdapter:
 
     def __init__(
         self,
-        token_url: str,
-        logout_url: str,
-        admin_users_url: str,
+        # Базовые параметры из конфига
+        keycloak_base_url: str,
+        realm: str,
         client_id: str,
-        client_secret: Optional[str] = None,
-        admin_username: str = "admin",
-        admin_password: str = "admin",
-        admin_client_id: str = "admin-cli",
-        admin_token_url: str = "http://keycloak:8080/realms/master/protocol/openid-connect/token",
-        realm: str = "myrealm",
-        frontend_url: str = "http://localhost:3000",
+        client_secret: Optional[str],
+        # Admin параметры
+        admin_username: str,
+        admin_password: str,
+        admin_client_id: str,
+        # Frontend
+        frontend_url: str,
+        # Опциональные параметры (для гибкости)
+        token_url: Optional[str] = None,
+        logout_url: Optional[str] = None,
+        admin_users_url: Optional[str] = None,
+        admin_token_url: Optional[str] = None,
+        # Timeouts
+        timeout: float = 10.0,
+        connect_timeout: float = 5.0,
     ):
-        self.token_url = token_url
-        self.base_url = token_url.split("/realms")[0]
-        self.frontend_url = frontend_url
-        self.logout_url = logout_url
-        self.admin_users_url = admin_users_url
+        # Базовые параметры
+        self.keycloak_base_url = keycloak_base_url.rstrip("/")
+        self.realm = realm
         self.client_id = client_id
         self.client_secret = client_secret
+        self.frontend_url = frontend_url
+
+        # Admin credentials
         self.admin_username = admin_username
         self.admin_password = admin_password
         self.admin_client_id = admin_client_id
-        self.admin_token_url = admin_token_url
-        self.realm = realm
+
+        # Строим URL если они не переданы явно
+        self.token_url = (
+            token_url
+            or f"{self.keycloak_base_url}/realms/{self.realm}/protocol/openid-connect/token"
+        )
+        self.logout_url = (
+            logout_url
+            or f"{self.keycloak_base_url}/realms/{self.realm}/protocol/openid-connect/logout"
+        )
+        self.admin_users_url = (
+            admin_users_url
+            or f"{self.keycloak_base_url}/admin/realms/{self.realm}/users"
+        )
+        self.admin_token_url = (
+            admin_token_url
+            or f"{self.keycloak_base_url}/realms/master/protocol/openid-connect/token"
+        )
+
+        # Состояние
         self._admin_token: Optional[str] = None
         self._admin_token_expires_at: float = 0.0
         self._admin_token_lock = asyncio.Lock()
-        self._client = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0))
+
+        # HTTP клиент
+        self._client = httpx.AsyncClient(
+            timeout=httpx.Timeout(timeout, connect=connect_timeout)
+        )
+
+    @classmethod
+    def from_settings(cls, settings) -> "KeycloakAdapter":
+        """Фабричный метод для создания адаптера из объекта настроек"""
+        return cls(
+            keycloak_base_url=settings.keycloak_url,
+            realm=settings.realm,
+            client_id=settings.client_id,
+            client_secret=settings.client_secret,
+            admin_username=settings.admin_username,
+            admin_password=settings.admin_password,
+            admin_client_id=settings.admin_client_id,
+            frontend_url=settings.frontend_url,
+            # Можно передать готовые URL из настроек
+            token_url=settings.token_url,
+            logout_url=settings.logout_url,
+            admin_users_url=settings.admin_users_url,
+            admin_token_url=settings.admin_token_url,
+        )
 
     async def close(self):
         await self._client.aclose()
 
     async def health_check(self) -> bool:
         try:
-            base = self.token_url.split("/realms")[0]
-            resp = await self._client.get(f"{base}/realms/{self.realm}")
+            resp = await self._client.get(
+                f"{self.keycloak_base_url}/realms/{self.realm}"
+            )
             return resp.status_code < 500
         except Exception:
             return False
@@ -70,15 +121,18 @@ class KeycloakAdapter:
     async def _get_admin_token(self) -> str:
         if self._admin_token and time.time() < self._admin_token_expires_at:
             return cast(str, self._admin_token)
+
         async with self._admin_token_lock:
             if self._admin_token and time.time() < self._admin_token_expires_at:
                 return cast(str, self._admin_token)
+
             data = {
                 "client_id": self.admin_client_id,
                 "username": self.admin_username,
                 "password": self.admin_password,
                 "grant_type": "password",
             }
+
             try:
                 resp = await self._client.post(self.admin_token_url, data=data)
                 resp.raise_for_status()
@@ -221,24 +275,21 @@ class KeycloakAdapter:
         Подтверждает email по action token.
         Использует публичный endpoint Keycloak для верификации.
         """
-        # Публичный endpoint Keycloak для обработки action tokens
-        verify_url = f"{self.base_url}/realms/{self.realm}/login-actions/action-token"
-
-        # Данные для верификации
+        verify_url = (
+            f"{self.keycloak_base_url}/realms/{self.realm}/login-actions/action-token"
+        )
         data = {"token": action_token, "client_id": self.client_id}
 
         if self.client_secret:
             data["client_secret"] = self.client_secret
 
         try:
-            # Keycloak сам валидирует токен и подтверждает email
             resp = await self._client.post(verify_url, data=data)
 
             if resp.status_code == 200:
                 logger.info("Email verified successfully")
                 return
             elif resp.status_code == 400:
-                # Анализируем ошибку
                 error_text = resp.text.lower()
                 if "expired" in error_text:
                     raise InvalidTokenError("Verification token has expired")
@@ -308,10 +359,7 @@ class KeycloakAdapter:
         Сброс пароля через action token.
         Использует публичный endpoint Keycloak для сброса пароля.
         """
-        # Endpoint для сброса пароля через action token
-        reset_url = (
-            f"{self.base_url}/realms/{self.realm}/login-actions/reset-credentials"
-        )
+        reset_url = f"{self.keycloak_base_url}/realms/{self.realm}/login-actions/reset-credentials"
 
         data = {
             "token": action_token,
@@ -383,6 +431,15 @@ class TokenVerifier:
         self._jwks_cache_time: float = 0.0
         self._cache_ttl: int = 600
 
+    @classmethod
+    def from_settings(cls, settings) -> "TokenVerifier":
+        """Фабричный метод для создания верификатора из настроек"""
+        return cls(
+            jwks_url=settings.jwks_url,
+            issuer=settings.issuer,
+            audience=settings.audience,
+        )
+
     async def close(self):
         await self._client.aclose()
 
@@ -393,7 +450,6 @@ class TokenVerifier:
                 logger.error("No kid in token header")
                 return None
 
-            # Проверяем кеш
             now = time.time()
             if (
                 self._jwks_cache is not None
