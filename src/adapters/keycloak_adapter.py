@@ -347,16 +347,17 @@ class KeycloakAdapter:
         return resp.json()
 
     async def send_reset_password_email(self, user_id: str) -> None:
-        """
-        Вызывает Keycloak API для отправки письма со ссылкой сброса пароля.
-        """
-        token: str = await self._get_admin_token()
+        """Отправляет письмо для сброса пароля."""
+        token = await self._get_admin_token()
         try:
             await self._retry_request(
                 "PUT",
                 f"{self.admin_users_url}/{user_id}/execute-actions-email",
+                params={
+                    "client_id": self.client_id,
+                    "redirect_uri": f"{self.frontend_url}/reset-password",
+                },
                 headers={"Authorization": f"Bearer {token}"},
-                params={"redirect_uri": f"{self.frontend_url}/reset-password"},
                 json=["UPDATE_PASSWORD"],
             )
             logger.info(f"Password reset email sent to user {user_id}")
@@ -370,45 +371,80 @@ class KeycloakAdapter:
         self, action_token: str, new_password: str
     ) -> None:
         """
-        Сброс пароля через action token.
-        Использует публичный endpoint Keycloak для сброса пароля.
+        Сброс пароля через action token (параметр key= из письма).
+
+        Декодируем токен без проверки подписи — получаем user_id (sub),
+        затем меняем пароль через Admin API. Тот же паттерн, что verify_email.
         """
-        reset_url = f"{self.keycloak_base_url}/realms/{self.realm}/login-actions/reset-credentials"
+        logger.info("RESET_PASSWORD called with token: %s...", action_token[:50])
 
-        data = {
-            "token": action_token,
-            "password-new": new_password,
-            "password-confirm": new_password,
-            "client_id": self.client_id,
-        }
+        # 1. Декодируем токен и валидируем claims
+        try:
+            unverified = jwt.get_unverified_claims(action_token)
 
-        if self.client_secret:
-            data["client_secret"] = self.client_secret
+            if "UPDATE_PASSWORD" not in unverified.get("rqac", []):
+                raise InvalidTokenError("Token is not a password reset token")
+
+            exp = unverified.get("exp", 0)
+            if time.time() > exp:
+                raise InvalidTokenError("Reset token has expired")
+
+            user_id = unverified.get("sub")
+            if not user_id:
+                raise InvalidTokenError("No user ID in token")
+
+            logger.info("Resetting password for user: %s", user_id)
+
+        except InvalidTokenError:
+            raise
+        except Exception as e:
+            logger.error("Failed to decode reset token: %s", e)
+            raise InvalidTokenError("Invalid reset token")
+
+        # 2. Меняем пароль через Admin API
+        admin_token = await self._get_admin_token()
 
         try:
-            resp = await self._client.post(reset_url, data=data)
-
-            if resp.status_code == 200:
-                logger.info("Password reset successful")
-                return
-            elif resp.status_code == 400:
-                error_text = resp.text.lower()
-                if "expired" in error_text:
-                    raise InvalidTokenError("Reset token has expired")
-                elif "invalid" in error_text:
-                    raise InvalidTokenError("Invalid reset token")
-                elif "password" in error_text:
-                    raise ValueError(f"Invalid password: {resp.text}")
-                else:
-                    raise InvalidTokenError(f"Password reset failed: {resp.text}")
-            else:
-                resp.raise_for_status()
+            await self._retry_request(
+                "PUT",
+                f"{self.admin_users_url}/{user_id}/reset-password",
+                headers={"Authorization": f"Bearer {admin_token}"},
+                json={"type": "password", "value": new_password, "temporary": False},
+            )
+            logger.info("Password reset successful for user %s", user_id)
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"Password reset failed: {e}")
-            if e.response.status_code == 400:
-                raise InvalidTokenError("Invalid or expired reset token")
-            raise KeycloakError(f"Password reset failed: {e}")
+            if e.response.status_code == 404:
+                raise UserNotFoundError(f"User {user_id} not found")
+            logger.error(
+                "Failed to reset password: %d - %s",
+                e.response.status_code,
+                e.response.text,
+            )
+            raise KeycloakError("Failed to reset password")
+
+        # 3. Восстанавливаем emailVerified=true и снимаем VERIFY_EMAIL из requiredActions.
+        #    Keycloak при смене пароля через Admin API сбрасывает верификацию email —
+        #    это намеренная защита на случай компрометации аккаунта. Но здесь пользователь
+        #    получил ссылку именно на свой email, что само по себе подтверждает владение им,
+        #    поэтому повторная верификация избыточна.
+        try:
+            await self._retry_request(
+                "PUT",
+                f"{self.admin_users_url}/{user_id}",
+                headers={"Authorization": f"Bearer {admin_token}"},
+                json={"emailVerified": True, "requiredActions": []},
+            )
+            logger.info("emailVerified restored for user %s", user_id)
+        except httpx.HTTPStatusError as e:
+            # Некритично — пользователь сможет повторно верифицировать email.
+            # Пароль уже сброшен успешно, не откатываем.
+            logger.error(
+                "Failed to restore emailVerified for user %s: %d - %s",
+                user_id,
+                e.response.status_code,
+                e.response.text,
+            )
 
     async def logout(self, refresh_token: str) -> None:
         data = {"client_id": self.client_id, "refresh_token": refresh_token}

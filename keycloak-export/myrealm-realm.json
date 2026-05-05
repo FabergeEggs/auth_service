@@ -28,7 +28,8 @@
       "standardFlowEnabled": true,
       "redirectUris": [
         "http://localhost:3000/*",
-        "http://localhost:8000/*"
+        "http://localhost:8000/*",
+        "http://localhost:3000/reset-password"
       ],
       "webOrigins": ["http://localhost:3000"],
       "secret": "nmeYwMzWRHuLb7V5iCnF9T8vQ2TlW3af"
