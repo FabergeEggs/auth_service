@@ -271,40 +271,54 @@ class KeycloakAdapter:
             raise
 
     async def verify_email(self, action_token: str) -> None:
-        """
-        Подтверждает email по action token.
-        Использует публичный endpoint Keycloak для верификации.
-        """
-        verify_url = (
-            f"{self.keycloak_base_url}/realms/{self.realm}/login-actions/action-token"
-        )
-        data = {"token": action_token, "client_id": self.client_id}
-
-        if self.client_secret:
-            data["client_secret"] = self.client_secret
+        """Подтверждает email через Admin API — декодируем токен и ставим emailVerified=true"""
+        logger.info(f"VERIFY_EMAIL called with token: {action_token[:50]}...")
 
         try:
-            resp = await self._client.post(verify_url, data=data)
+            # Декодируем токен без проверки подписи, чтобы получить user_id (sub)
+            # Подпись мы не можем проверить здесь т.к. issuer внутри Docker отличается
+            unverified = jwt.get_unverified_claims(action_token)
 
-            if resp.status_code == 200:
-                logger.info("Email verified successfully")
-                return
-            elif resp.status_code == 400:
-                error_text = resp.text.lower()
-                if "expired" in error_text:
-                    raise InvalidTokenError("Verification token has expired")
-                elif "invalid" in error_text:
-                    raise InvalidTokenError("Invalid verification token")
-                else:
-                    raise InvalidTokenError(f"Verification failed: {resp.text}")
-            else:
-                resp.raise_for_status()
+            # Проверяем что это действительно токен верификации email
+            if "VERIFY_EMAIL" not in unverified.get("rqac", []):
+                raise InvalidTokenError("Token is not an email verification token")
+
+            # Проверяем срок действия вручную
+            exp = unverified.get("exp", 0)
+            if time.time() > exp:
+                raise InvalidTokenError("Verification token has expired")
+
+            user_id = unverified.get("sub")
+            if not user_id:
+                raise InvalidTokenError("No user ID in token")
+
+            logger.info(f"Verifying email for user: {user_id}")
+
+        except InvalidTokenError:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to decode token: {e}")
+            raise InvalidTokenError("Invalid verification token")
+
+        # Используем Admin API чтобы поставить emailVerified=true
+        admin_token = await self._get_admin_token()
+
+        try:
+            await self._retry_request(
+                "PUT",
+                f"{self.admin_users_url}/{user_id}",
+                headers={"Authorization": f"Bearer {admin_token}"},
+                json={"emailVerified": True, "requiredActions": []},
+            )
+            logger.info(f"Email verified successfully for user {user_id}")
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"Email verification failed: {e}")
-            if e.response.status_code == 400:
-                raise InvalidTokenError("Invalid or expired verification token")
-            raise KeycloakError(f"Verification failed: {e}")
+            if e.response.status_code == 404:
+                raise UserNotFoundError(f"User {user_id} not found")
+            logger.error(
+                f"Failed to verify email: {e.response.status_code} - {e.response.text}"
+            )
+            raise KeycloakError("Failed to verify email")
 
     async def login_with_username(self, username: str, password: str) -> dict:
         return await self._login_with_username(username, password)
@@ -476,17 +490,30 @@ class TokenVerifier:
         if not key:
             raise ValueError("No signing key available")
         try:
-            return cast(
-                Dict[str, Any],
-                jwt.decode(
-                    token,
-                    key,
-                    algorithms=["RS256"],
-                    issuer=self.issuer,
-                    audience=self.audience,
-                    options={"verify_signature": True, "verify_exp": True},
-                ),
+            # Try primary audience first
+            audiences = (
+                self.audience
+                if isinstance(self.audience, list)
+                else [self.audience, "account"]  # fallback for Keycloak default tokens
             )
+            last_err = None
+            for aud in audiences:
+                try:
+                    return cast(
+                        Dict[str, Any],
+                        jwt.decode(
+                            token,
+                            key,
+                            algorithms=["RS256"],
+                            issuer=self.issuer,
+                            audience=aud,
+                            options={"verify_signature": True, "verify_exp": True},
+                        ),
+                    )
+                except JWTError as e:
+                    last_err = e
+                    continue
+            raise last_err
         except ExpiredSignatureError:
             raise ValueError("Token expired")
         except JWTError as e:

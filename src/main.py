@@ -23,6 +23,7 @@ async def lifespan(app: FastAPI):
 
     # Инициализация адаптеров
     adapter = KeycloakAdapter(
+        keycloak_base_url=settings.keycloak_url,
         token_url=settings.token_url,
         logout_url=settings.logout_url,
         admin_users_url=settings.admin_users_url,

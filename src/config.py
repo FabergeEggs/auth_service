@@ -31,6 +31,19 @@ class Settings(BaseSettings):
     # Database
     database_url: str = Field("", alias="DATABASE_URL")
 
+    keycloak_public_url: str = Field(
+        "http://localhost:3000", alias="KEYCLOAK_PUBLIC_URL"
+    )
+    token_audience: str = Field("account", alias="KEYCLOAK_TOKEN_AUDIENCE")
+
+    @property
+    def issuer(self) -> str:
+        return f"{self.keycloak_public_url}/realms/{self.realm}"
+
+    @property
+    def audience(self) -> str:
+        return self.token_audience
+
     @property
     def token_url(self) -> str:
         return f"{self.keycloak_url}/realms/{self.realm}/protocol/openid-connect/token"
@@ -50,14 +63,6 @@ class Settings(BaseSettings):
     @property
     def jwks_url(self) -> str:
         return f"{self.keycloak_url}/realms/{self.realm}/protocol/openid-connect/certs"
-
-    @property
-    def issuer(self) -> str:
-        return f"{self.keycloak_url}/realms/{self.realm}"
-
-    @property
-    def audience(self) -> str:
-        return self.client_id
 
     @property
     def secure_cookies(self) -> bool:

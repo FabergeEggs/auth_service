@@ -315,6 +315,7 @@ async def logout_all(request: Request, claims: dict = Depends(get_current_claims
 @limiter.limit("5/minute")
 async def verify_email(payload: VerifyEmailRequestDTO, request: Request):
     """Подтверждение email по токену из письма."""
+    logger.info(f"Received token: {payload.key[:50]}...")
     business = await get_auth_service(request)
     try:
         await business.verify_email(payload.key)
