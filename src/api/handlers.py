@@ -1,6 +1,6 @@
 import logging
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from httpx import HTTPStatusError
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -142,7 +142,8 @@ async def login(request: Request, response: Response, payload: LoginRequestDTO):
             user_id=data.get("user_id"),
         )
 
-        max_age = data.get("refresh_expires_in", settings.refresh_token_max_age)
+        max_age = data.get("refresh_expires_in",
+                           settings.refresh_token_max_age)
         response.set_cookie(
             key="refresh_token",
             value=data["refresh_token"],
@@ -157,7 +158,8 @@ async def login(request: Request, response: Response, payload: LoginRequestDTO):
         return token_response
 
     except KeycloakUnavailableError:
-        raise HTTPException(503, "Authentication service temporarily unavailable")
+        raise HTTPException(
+            503, "Authentication service temporarily unavailable")
     except HTTPStatusError:
         logger.warning("Login failed")
         raise HTTPException(401, "Invalid credentials")
@@ -206,7 +208,8 @@ async def refresh(request: Request, response: Response):
 
         # Keycloak может вернуть новый refresh_token (token rotation)
         if "refresh_token" in data:
-            max_age = data.get("refresh_expires_in", settings.refresh_token_max_age)
+            max_age = data.get("refresh_expires_in",
+                               settings.refresh_token_max_age)
             response.set_cookie(
                 key="refresh_token",
                 value=data["refresh_token"],
@@ -230,7 +233,8 @@ async def refresh(request: Request, response: Response):
         raise HTTPException(401, "Invalid refresh token")
 
     except KeycloakUnavailableError:
-        raise HTTPException(503, "Authentication service temporarily unavailable")
+        raise HTTPException(
+            503, "Authentication service temporarily unavailable")
 
 
 @router.post(
@@ -257,7 +261,8 @@ async def logout(request: Request, response: Response):
         except HTTPStatusError:
             pass
         except KeycloakUnavailableError:
-            raise HTTPException(503, "Authentication service temporarily unavailable")
+            raise HTTPException(
+                503, "Authentication service temporarily unavailable")
         finally:
             response.delete_cookie(
                 key="refresh_token",
@@ -325,7 +330,8 @@ async def verify_email(payload: VerifyEmailRequestDTO, request: Request):
         raise HTTPException(400, str(e))
     except KeycloakError as e:
         logger.error(f"Keycloak error during verification: {e}")
-        raise HTTPException(503, "Verification service temporarily unavailable")
+        raise HTTPException(
+            503, "Verification service temporarily unavailable")
     except Exception as e:
         logger.error(f"Email verification failed: {e}", exc_info=True)
         raise HTTPException(500, "Verification failed")
@@ -367,7 +373,8 @@ async def reset_password(payload: ResetPasswordRequestDTO, request: Request):
         raise HTTPException(400, str(e))
     except KeycloakError as e:
         logger.error(f"Keycloak error during password reset: {e}")
-        raise HTTPException(503, "Password reset service temporarily unavailable")
+        raise HTTPException(
+            503, "Password reset service temporarily unavailable")
     except Exception as e:
         logger.error(f"Password reset failed: {e}", exc_info=True)
         raise HTTPException(500, "Password reset failed")
@@ -400,7 +407,8 @@ async def forgot_password(payload: ForgotPasswordRequestDTO, request: Request):
         return {"message": "If the email exists, a password reset link has been sent"}
     except KeycloakUnavailableError:
         logger.error("Keycloak unavailable during forgot password")
-        raise HTTPException(503, "Authentication service temporarily unavailable")
+        raise HTTPException(
+            503, "Authentication service temporarily unavailable")
     except Exception as e:
         logger.error(f"Forgot password failed: {e}", exc_info=True)
         raise HTTPException(500, "Internal error")
@@ -455,10 +463,12 @@ async def get_me(request: Request, claims: dict = Depends(get_current_claims)):
         return MeResponseDTO(**payload)
     except ValueError as e:
         logger.error(f"Invalid claims in /auth/me: {e}")
-        raise HTTPException(status_code=401, detail="Invalid authentication data")
+        raise HTTPException(
+            status_code=401, detail="Invalid authentication data")
     except TypeError as e:
         logger.error(f"Type error in /auth/me: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
     except Exception as e:
         logger.error(f"Unexpected error in /auth/me: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to get user information")
+        raise HTTPException(
+            status_code=500, detail="Failed to get user information")
