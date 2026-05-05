@@ -29,18 +29,21 @@ class KafkaEventProducer:
             logger.info("Kafka producer stopped")
 
     async def send_event(self, event_type: str, data: Dict[str, Any]) -> None:
+        logger.info(f"send_event called with event_type='{event_type}'")
         if not self.producer:
             raise RuntimeError("Producer not started")
-
+        logger.info(f"send_event called with event_type='{event_type}'")
         event = {
             "event_id": str(uuid4()),
             "event_type": event_type,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "data": data,
         }
-
+        logger.info(f"event содержимое: {event}")
         # Validate payload before handing it off to the producer.
         json.dumps(event)
+        logger.info(f"ОТПРАВКА В ТОПИК: '{event_type}'")
 
         await self.producer.send(event_type, event)
+        logger.info(f"ОТПРАВЛЕНО В ТОПИК: '{event_type}'")
         logger.info(f"Event sent: {event_type}", extra={"event_id": event["event_id"]})

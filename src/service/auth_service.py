@@ -49,8 +49,7 @@ class AuthService:
                 about=about,
             )
 
-        logger.info("User registered", extra={
-                    "event": "register", "user_id": user_id})
+        logger.info("User registered", extra={"event": "register", "user_id": user_id})
 
         if self._event_producer:
             try:
@@ -67,8 +66,7 @@ class AuthService:
                 )
                 logger.info(f"UserRegistered event sent for {user_id}")
             except Exception as e:
-                logger.error(
-                    f"Failed to send UserRegistered event: {e}", exc_info=True)
+                logger.error(f"Failed to send UserRegistered event: {e}", exc_info=True)
 
         return user_id
 
@@ -155,8 +153,7 @@ class AuthService:
             raise ValueError("Claims cannot be empty")
 
         if not isinstance(claims, dict):
-            raise TypeError(
-                f"Claims must be dict, got {type(claims).__name__}")
+            raise TypeError(f"Claims must be dict, got {type(claims).__name__}")
 
         if not claims:
             raise ValueError("Claims cannot be empty")
