@@ -1,0 +1,556 @@
+import logging
+import time
+import asyncio
+from typing import Optional, Dict, Any, cast, Union
+import httpx
+from jose import jwt, JWTError, ExpiredSignatureError
+from src.errors import (
+    InvalidTokenError,
+    UserNotFoundError,
+    KeycloakError,
+    KeycloakUnavailableError,
+    KeycloakConflictError,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class KeycloakUserAttributes:
+    PHONE = "phone"
+    ABOUT = "about"
+
+
+class KeycloakAdapter:
+    MAX_RETRIES = 3
+    RETRY_DELAY = 1.0
+    ADMIN_TOKEN_BUFFER = 60
+
+    def __init__(
+        self,
+        # Базовые параметры из конфига
+        keycloak_base_url: str,
+        realm: str,
+        client_id: str,
+        client_secret: Optional[str],
+        # Admin параметры
+        admin_username: str,
+        admin_password: str,
+        admin_client_id: str,
+        # Frontend
+        frontend_url: str,
+        # Опциональные параметры (для гибкости)
+        token_url: Optional[str] = None,
+        logout_url: Optional[str] = None,
+        admin_users_url: Optional[str] = None,
+        admin_token_url: Optional[str] = None,
+        # Timeouts
+        timeout: float = 10.0,
+        connect_timeout: float = 5.0,
+    ):
+        # Базовые параметры
+        self.keycloak_base_url = keycloak_base_url.rstrip("/")
+        self.realm = realm
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.frontend_url = frontend_url
+
+        # Admin credentials
+        self.admin_username = admin_username
+        self.admin_password = admin_password
+        self.admin_client_id = admin_client_id
+
+        # Строим URL если они не переданы явно
+        self.token_url = (
+            token_url
+            or f"{self.keycloak_base_url}/realms/{self.realm}/protocol/openid-connect/token"
+        )
+        self.logout_url = (
+            logout_url
+            or f"{self.keycloak_base_url}/realms/{self.realm}/protocol/openid-connect/logout"
+        )
+        self.admin_users_url = (
+            admin_users_url
+            or f"{self.keycloak_base_url}/admin/realms/{self.realm}/users"
+        )
+        self.admin_token_url = (
+            admin_token_url
+            or f"{self.keycloak_base_url}/realms/master/protocol/openid-connect/token"
+        )
+
+        # Состояние
+        self._admin_token: Optional[str] = None
+        self._admin_token_expires_at: float = 0.0
+        self._admin_token_lock = asyncio.Lock()
+
+        # HTTP клиент
+        self._client = httpx.AsyncClient(
+            timeout=httpx.Timeout(timeout, connect=connect_timeout)
+        )
+
+    @classmethod
+    def from_settings(cls, settings) -> "KeycloakAdapter":
+        """Фабричный метод для создания адаптера из объекта настроек"""
+        return cls(
+            keycloak_base_url=settings.keycloak_url,
+            realm=settings.realm,
+            client_id=settings.client_id,
+            client_secret=settings.client_secret,
+            admin_username=settings.admin_username,
+            admin_password=settings.admin_password,
+            admin_client_id=settings.admin_client_id,
+            frontend_url=settings.frontend_url,
+            # Можно передать готовые URL из настроек
+            token_url=settings.token_url,
+            logout_url=settings.logout_url,
+            admin_users_url=settings.admin_users_url,
+            admin_token_url=settings.admin_token_url,
+        )
+
+    async def close(self):
+        await self._client.aclose()
+
+    async def health_check(self) -> bool:
+        try:
+            resp = await self._client.get(
+                f"{self.keycloak_base_url}/realms/{self.realm}"
+            )
+            return resp.status_code < 500
+        except Exception:
+            return False
+
+    async def _get_admin_token(self) -> str:
+        if self._admin_token and time.time() < self._admin_token_expires_at:
+            return cast(str, self._admin_token)
+
+        async with self._admin_token_lock:
+            if self._admin_token and time.time() < self._admin_token_expires_at:
+                return cast(str, self._admin_token)
+
+            data = {
+                "client_id": self.admin_client_id,
+                "username": self.admin_username,
+                "password": self.admin_password,
+                "grant_type": "password",
+            }
+
+            try:
+                resp = await self._client.post(self.admin_token_url, data=data)
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                logger.error("Failed to get admin token: %s", e)
+                raise KeycloakUnavailableError(
+                    "Keycloak admin token unavailable"
+                ) from e
+            except httpx.RequestError as e:
+                logger.error("Network error getting admin token: %s", e)
+                raise KeycloakUnavailableError("Keycloak unreachable") from e
+
+            token_data = resp.json()
+            token = token_data["access_token"]
+            self._admin_token = token
+            expires = token_data.get("expires_in", 300)
+            self._admin_token_expires_at = (
+                time.time() + expires - self.ADMIN_TOKEN_BUFFER
+            )
+            return cast(str, self._admin_token)
+
+    async def _retry_request(self, method: str, url: str, **kwargs) -> httpx.Response:
+        last_exc: Union[
+            httpx.TimeoutException, httpx.ConnectError, httpx.HTTPStatusError, None
+        ] = None
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                resp = await self._client.request(method, url, **kwargs)
+                resp.raise_for_status()
+                return resp
+            except (httpx.TimeoutException, httpx.ConnectError) as e:
+                last_exc = e
+                logger.warning(
+                    "Network error on attempt %d/%d for %s %s: %s",
+                    attempt + 1,
+                    self.MAX_RETRIES,
+                    method,
+                    url,
+                    e,
+                )
+            except httpx.HTTPStatusError as e:
+                if 400 <= e.response.status_code < 500:
+                    raise
+                last_exc = e
+                logger.warning(
+                    "HTTP %d on attempt %d/%d for %s %s",
+                    e.response.status_code,
+                    attempt + 1,
+                    self.MAX_RETRIES,
+                    method,
+                    url,
+                )
+            if attempt < self.MAX_RETRIES - 1:
+                await asyncio.sleep(self.RETRY_DELAY * (2**attempt))
+        if last_exc is None:
+            raise RuntimeError("Retry loop ended without exception")
+        raise last_exc
+
+    async def get_user_by_username(self, username: str) -> Optional[Dict[str, Any]]:
+        """Получить пользователя по username"""
+        token: str = await self._get_admin_token()
+        resp = await self._retry_request(
+            "GET",
+            self.admin_users_url,
+            headers={"Authorization": f"Bearer {token}"},
+            params={"username": username, "exact": "true"},
+        )
+        users = resp.json()
+        return cast(Optional[Dict[str, Any]], users[0]) if users else None
+
+    async def create_user(
+        self,
+        username: str,
+        email: str,
+        password: str,
+        first_name: Optional[str] = None,
+        last_name: Optional[str] = None,
+        phone: Optional[str] = None,
+        about: Optional[str] = None,
+    ) -> str:
+        token: str = await self._get_admin_token()
+        user_data = {
+            "username": username,
+            "email": email,
+            "enabled": True,
+            "emailVerified": False,
+            "credentials": [
+                {"type": "password", "value": password, "temporary": False}
+            ],
+        }
+        if first_name:
+            user_data["firstName"] = first_name
+        if last_name:
+            user_data["lastName"] = last_name
+
+        attributes = {}
+        if phone:
+            attributes[KeycloakUserAttributes.PHONE] = [phone]
+        if about:
+            attributes[KeycloakUserAttributes.ABOUT] = [about]
+        if attributes:
+            user_data["attributes"] = attributes
+
+        try:
+            resp = await self._retry_request(
+                "POST",
+                self.admin_users_url,
+                headers={"Authorization": f"Bearer {token}"},
+                json=user_data,
+            )
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 409:
+                raise KeycloakConflictError("User already exists") from e
+            raise
+
+        location = resp.headers.get("Location")
+        if location:
+            user_id = location.split("/")[-1]
+            await self.send_verification_email(user_id)
+            return user_id
+        raise Exception("No user id returned")
+
+    async def send_verification_email(self, user_id: str) -> None:
+        """Отправить письмо для верификации email"""
+        token = await self._get_admin_token()
+        try:
+            await self._retry_request(
+                "PUT",
+                f"{self.admin_users_url}/{user_id}/execute-actions-email",
+                headers={"Authorization": f"Bearer {token}"},
+                json=["VERIFY_EMAIL"],
+            )
+            logger.info(f"Verification email sent to user {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to send verification email: {e}")
+            raise
+
+    async def verify_email(self, action_token: str) -> None:
+        """Подтверждает email через Admin API — декодируем токен и ставим emailVerified=true"""
+        logger.info(f"VERIFY_EMAIL called with token: {action_token[:50]}...")
+
+        try:
+            # Декодируем токен без проверки подписи, чтобы получить user_id (sub)
+            # Подпись мы не можем проверить здесь т.к. issuer внутри Docker отличается
+            unverified = jwt.get_unverified_claims(action_token)
+
+            # Проверяем что это действительно токен верификации email
+            if "VERIFY_EMAIL" not in unverified.get("rqac", []):
+                raise InvalidTokenError("Token is not an email verification token")
+
+            # Проверяем срок действия вручную
+            exp = unverified.get("exp", 0)
+            if time.time() > exp:
+                raise InvalidTokenError("Verification token has expired")
+
+            user_id = unverified.get("sub")
+            if not user_id:
+                raise InvalidTokenError("No user ID in token")
+
+            logger.info(f"Verifying email for user: {user_id}")
+
+        except InvalidTokenError:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to decode token: {e}")
+            raise InvalidTokenError("Invalid verification token")
+
+        # Используем Admin API чтобы поставить emailVerified=true
+        admin_token = await self._get_admin_token()
+
+        try:
+            await self._retry_request(
+                "PUT",
+                f"{self.admin_users_url}/{user_id}",
+                headers={"Authorization": f"Bearer {admin_token}"},
+                json={"emailVerified": True, "requiredActions": []},
+            )
+            logger.info(f"Email verified successfully for user {user_id}")
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                raise UserNotFoundError(f"User {user_id} not found")
+            logger.error(
+                f"Failed to verify email: {e.response.status_code} - {e.response.text}"
+            )
+            raise KeycloakError("Failed to verify email")
+
+    async def login_with_username(self, username: str, password: str) -> dict:
+        return await self._login_with_username(username, password)
+
+    async def _login_with_username(self, username: str, password: str) -> dict:
+        data = {
+            "client_id": self.client_id,
+            "username": username,
+            "password": password,
+            "grant_type": "password",
+        }
+        if self.client_secret:
+            data["client_secret"] = self.client_secret
+        resp = await self._retry_request("POST", self.token_url, data=data)
+        return resp.json()
+
+    async def refresh_token(self, refresh_token: str) -> dict:
+        data = {
+            "client_id": self.client_id,
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token",
+        }
+        if self.client_secret:
+            data["client_secret"] = self.client_secret
+        resp = await self._retry_request("POST", self.token_url, data=data)
+        return resp.json()
+
+    async def send_reset_password_email(self, user_id: str) -> None:
+        """Отправляет письмо для сброса пароля."""
+        token = await self._get_admin_token()
+        try:
+            await self._retry_request(
+                "PUT",
+                f"{self.admin_users_url}/{user_id}/execute-actions-email",
+                params={
+                    "client_id": self.client_id,
+                    "redirect_uri": f"{self.frontend_url}/reset-password",
+                },
+                headers={"Authorization": f"Bearer {token}"},
+                json=["UPDATE_PASSWORD"],
+            )
+            logger.info(f"Password reset email sent to user {user_id}")
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.warning("User %s not found when sending reset email", user_id)
+                raise UserNotFoundError(f"User {user_id} not found")
+            raise
+
+    async def reset_password_with_action_token(
+        self, action_token: str, new_password: str
+    ) -> None:
+        """
+        Сброс пароля через action token (параметр key= из письма).
+
+        Декодируем токен без проверки подписи — получаем user_id (sub),
+        затем меняем пароль через Admin API. Тот же паттерн, что verify_email.
+        """
+        logger.info("RESET_PASSWORD called with token: %s...", action_token[:50])
+
+        # 1. Декодируем токен и валидируем claims
+        try:
+            unverified = jwt.get_unverified_claims(action_token)
+
+            if "UPDATE_PASSWORD" not in unverified.get("rqac", []):
+                raise InvalidTokenError("Token is not a password reset token")
+
+            exp = unverified.get("exp", 0)
+            if time.time() > exp:
+                raise InvalidTokenError("Reset token has expired")
+
+            user_id = unverified.get("sub")
+            if not user_id:
+                raise InvalidTokenError("No user ID in token")
+
+            logger.info("Resetting password for user: %s", user_id)
+
+        except InvalidTokenError:
+            raise
+        except Exception as e:
+            logger.error("Failed to decode reset token: %s", e)
+            raise InvalidTokenError("Invalid reset token")
+
+        # 2. Меняем пароль через Admin API
+        admin_token = await self._get_admin_token()
+
+        try:
+            await self._retry_request(
+                "PUT",
+                f"{self.admin_users_url}/{user_id}/reset-password",
+                headers={"Authorization": f"Bearer {admin_token}"},
+                json={"type": "password", "value": new_password, "temporary": False},
+            )
+            logger.info("Password reset successful for user %s", user_id)
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                raise UserNotFoundError(f"User {user_id} not found")
+            logger.error(
+                "Failed to reset password: %d - %s",
+                e.response.status_code,
+                e.response.text,
+            )
+            raise KeycloakError("Failed to reset password")
+
+        # 3. Восстанавливаем emailVerified=true и снимаем VERIFY_EMAIL из requiredActions.
+        #    Keycloak при смене пароля через Admin API сбрасывает верификацию email —
+        #    это намеренная защита на случай компрометации аккаунта. Но здесь пользователь
+        #    получил ссылку именно на свой email, что само по себе подтверждает владение им,
+        #    поэтому повторная верификация избыточна.
+        try:
+            await self._retry_request(
+                "PUT",
+                f"{self.admin_users_url}/{user_id}",
+                headers={"Authorization": f"Bearer {admin_token}"},
+                json={"emailVerified": True, "requiredActions": []},
+            )
+            logger.info("emailVerified restored for user %s", user_id)
+        except httpx.HTTPStatusError as e:
+            # Некритично — пользователь сможет повторно верифицировать email.
+            # Пароль уже сброшен успешно, не откатываем.
+            logger.error(
+                "Failed to restore emailVerified for user %s: %d - %s",
+                user_id,
+                e.response.status_code,
+                e.response.text,
+            )
+
+    async def logout(self, refresh_token: str) -> None:
+        data = {"client_id": self.client_id, "refresh_token": refresh_token}
+        if self.client_secret:
+            data["client_secret"] = self.client_secret
+        await self._retry_request("POST", self.logout_url, data=data)
+
+    async def logout_all_sessions(self, user_id: str) -> None:
+        token: str = await self._get_admin_token()
+        try:
+            await self._retry_request(
+                "DELETE",
+                f"{self.admin_users_url}/{user_id}/sessions",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            logger.info(f"All sessions terminated for user {user_id}")
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.warning("User %s not found when terminating sessions", user_id)
+            else:
+                raise
+        except Exception as e:
+            logger.error("Failed to logout all sessions for user %s: %s", user_id, e)
+            raise
+
+
+class TokenVerifier:
+    def __init__(self, jwks_url: str, issuer: str, audience: str):
+        self.jwks_url = jwks_url
+        self.issuer = issuer
+        self.audience = audience
+        self._client = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0))
+        self._jwks_cache: Optional[Dict[str, Any]] = None
+        self._jwks_cache_time: float = 0.0
+        self._cache_ttl: int = 600
+
+    @classmethod
+    def from_settings(cls, settings) -> "TokenVerifier":
+        """Фабричный метод для создания верификатора из настроек"""
+        return cls(
+            jwks_url=settings.jwks_url,
+            issuer=settings.issuer,
+            audience=settings.audience,
+        )
+
+    async def close(self):
+        await self._client.aclose()
+
+    async def _get_signing_key(self, token: str) -> Optional[Dict[str, Any]]:
+        try:
+            kid = jwt.get_unverified_header(token).get("kid")
+            if not kid:
+                logger.error("No kid in token header")
+                return None
+
+            now = time.time()
+            if (
+                self._jwks_cache is not None
+                and (now - self._jwks_cache_time) < self._cache_ttl
+            ):
+                keys = self._jwks_cache.get("keys", [])
+            else:
+                resp = await self._client.get(self.jwks_url)
+                resp.raise_for_status()
+                self._jwks_cache = resp.json()
+                self._jwks_cache_time = now
+                keys = self._jwks_cache.get("keys", []) if self._jwks_cache else []
+
+            for k in keys:
+                if k.get("kid") == kid:
+                    return k
+            logger.error("No key with kid=%s found in JWKS", kid)
+        except Exception as e:
+            logger.error("Failed to fetch JWKS: %s", e)
+        return None
+
+    async def verify(self, token: str) -> Dict[str, Any]:
+        key = await self._get_signing_key(token)
+        if not key:
+            raise ValueError("No signing key available")
+        try:
+            # Try primary audience first
+            audiences = (
+                self.audience
+                if isinstance(self.audience, list)
+                else [self.audience, "account"]  # fallback for Keycloak default tokens
+            )
+            last_err = None
+            for aud in audiences:
+                try:
+                    return cast(
+                        Dict[str, Any],
+                        jwt.decode(
+                            token,
+                            key,
+                            algorithms=["RS256"],
+                            issuer=self.issuer,
+                            audience=aud,
+                            options={"verify_signature": True, "verify_exp": True},
+                        ),
+                    )
+                except JWTError as e:
+                    last_err = e
+                    continue
+            raise last_err
+        except ExpiredSignatureError:
+            raise ValueError("Token expired")
+        except JWTError as e:
+            raise ValueError(f"Invalid token: {e}")

@@ -1,0 +1,97 @@
+{
+  "realm": "myrealm",
+  "enabled": true,
+  "sslRequired": "none",
+  "displayName": "My Realm",
+  "verifyEmail": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "smtpServer": {
+    "host": "mailhog",
+    "port": "1025",
+    "from": "noreply@myapp.local",
+    "fromDisplayName": "My App Auth",
+    "ssl": "false",
+    "starttls": "false",
+    "auth": "false",
+    "envelopeFrom": ""
+  },
+  "clients": [
+    {
+      "clientId": "auth-service",
+      "enabled": true,
+      "publicClient": false,
+      "serviceAccountsEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "redirectUris": [
+        "http://localhost:3000/*",
+        "http://localhost:8000/*",
+        "http://localhost:3000/reset-password",
+        "http://158.160.90.90:3000/*",
+        "http://158.160.90.90:3000/reset-password"
+      ],
+      "webOrigins": [
+        "http://localhost:3000",
+        "http://158.160.90.90:3000"
+      ],
+      "secret": "nmeYwMzWRHuLb7V5iCnF9T8vQ2TlW3af"
+    },
+    {
+      "clientId": "admin-cli",
+      "enabled": true,
+      "publicClient": true,
+      "directAccessGrantsEnabled": true
+    }
+  ],
+  "users": [
+    {
+      "username": "admin",
+      "enabled": true,
+      "email": "admin@myapp.local",
+      "firstName": "Admin",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "myadmin",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["admin"],
+      "clientRoles": {
+        "realm-management": ["realm-admin"]
+      },
+      "emailVerified": true
+    }
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "admin",
+        "description": "Administrator role"
+      },
+      {
+        "name": "user",
+        "description": "Regular user role"
+      }
+    ]
+  },
+  "requiredActions": [
+    {
+      "alias": "VERIFY_EMAIL",
+      "name": "Verify Email",
+      "providerId": "VERIFY_EMAIL",
+      "enabled": true,
+      "defaultAction": true,
+      "priority": 10
+    }
+  ],
+  "attributes": {
+    "email_verified_required": "true",
+    "frontendUrl": "http://158.160.90.90:3000"
+  },
+  "emailTheme": "my-email-theme"
+}

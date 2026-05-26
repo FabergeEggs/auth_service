@@ -1,0 +1,11 @@
+pytest==8.3.3
+pytest-asyncio==0.24.0
+pytest-cov==5.0.0
+pytest-mock==3.14.0
+pytest-xdist==3.6.1
+faker==30.8.1
+factory-boy==3.3.0
+testcontainers==4.8.1
+asyncpg==0.30.0
+freezegun==1.5.1
+time-machine==2.16.0
