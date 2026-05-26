@@ -1,11 +1,14 @@
 <#assign token = link?keep_after("key=")?keep_before("&")>
+<#assign frontendUrl = properties.frontendUrl!"http://158.160.90.90:3000">
 <#if requiredActions?seq_contains("UPDATE_PASSWORD")>
-Reset your password: http://localhost:3000/reset-password/${token}
+<#assign actionUrl = "${frontendUrl}/reset-password/${token}">
+Reset your password: ${actionUrl}
 
 This link will expire within 12 hours.
 If you didn't request this, please ignore this email.
 <#else>
-Verify your email: http://localhost:3000/verify-email/${token}
+<#assign actionUrl = "${frontendUrl}/verify-email/${token}">
+Verify your email: ${actionUrl}
 
 This link will expire within 12 hours.
 </#if>

@@ -1,4 +1,3 @@
-import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,9 +10,9 @@ from src.service.auth_service import AuthService
 from src.api.handlers import router, limiter
 from src.config import settings
 from src.adapters.kafka_producer import KafkaEventProducer
+from src.core.logging import setup_logging
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = setup_logging()
 
 
 @asynccontextmanager

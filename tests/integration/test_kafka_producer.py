@@ -69,7 +69,7 @@ class TestKafkaProducerSendEvent:
             "action": "register",
         }
 
-        await kafka_producer.send_event("user.registered", event_data)
+        await kafka_producer.send_event("profile_service.user.registered", event_data)
 
         mock_producer.send.assert_called_once()
 
@@ -78,8 +78,8 @@ class TestKafkaProducerSendEvent:
         topic = call_args[0][0]
         event = call_args[0][1]
 
-        assert topic == "user.registered"
-        assert event["event_type"] == "user.registered"
+        assert topic == "profile_service.user.registered"
+        assert event["event_type"] == "profile_service.user.registered"
         assert event["data"] == event_data
         assert "event_id" in event
         assert "timestamp" in event

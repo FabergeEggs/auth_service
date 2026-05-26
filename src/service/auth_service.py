@@ -2,6 +2,7 @@ import logging
 import base64
 import json
 from typing import Optional, Any
+from src.kafka_topics import USER_REGISTERED
 from src.service.abstractions_service import AuthProviderInterface
 from src.errors import AuthProviderConflictError, UserAlreadyExistsError
 
@@ -54,7 +55,7 @@ class AuthService:
         if self._event_producer:
             try:
                 await self._event_producer.send_event(
-                    "user.created",
+                    USER_REGISTERED,
                     {
                         "user_id": user_id,
                         "email": email,

@@ -9,9 +9,13 @@ class Settings(BaseSettings):
     )
 
     environment: str = "development"
-    cors_origins: List[str] = ["http://localhost:3000"]
+    log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    cors_origins: List[str] = [
+        "http://localhost:3000",
+        "http://158.160.90.90:3000",
+    ]
     refresh_token_max_age: int = 2592000
-    frontend_url: str = "http://localhost:3000"
+    frontend_url: str = Field("http://158.160.90.90:3000", alias="FRONTEND_URL")
 
     # Keycloak
     keycloak_url: str = Field("http://keycloak:8080", alias="KEYCLOAK_BASE_URL")

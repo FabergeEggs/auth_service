@@ -31,3 +31,6 @@ venv/
 # Temporary files
 *.tmp
 *.temp
+
+# Local curl/debug artifacts (may contain tokens)
+cookies.txt
